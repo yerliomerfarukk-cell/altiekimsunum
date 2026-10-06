@@ -34,6 +34,8 @@
      statement : kicker, text ("\n" yeni satır), sub, big (tek büyük sözcük), ring (ortada dönen yüzük),
                  lineDelay (sn; ikinci satır bu kadar geç gelir)
      media     : kicker, heading, sub, lines:[…], stepwise (true → satırlar tek tek), media, caption
+                 stages:[{ media, caption, lines }] → aşamalı fotoğraf (media/caption yerine): her "ileri"de
+                 sıradaki görsel mürekkep lekesiyle açılır; lines = o aşamada görünen satır sayısı
      list      : heading, sub, items:["…" | { title, detail }], stepwise (false → hepsi birden),
                  columns:2, chain:true (oklu zincir), footer (son maddeden sonra beliren mono satır)
      reversed  : worldA / worldB → { label, title, subtitle, points, stat, quote, dialog:[2 satır], media, stepwise }
@@ -228,7 +230,10 @@ window.SLIDES = [
       'Girdap sahnesi ve jet skiler: CGI.',
       'Ama her şey CGI değil: domuz sahnesinde hareket ettirilebilen mekanik parçalar kullanıldı.'
     ],
-    media: 'assets/media/odyssey-bts.jpeg', caption: 'The Odyssey · Kamera arkası',
+    stages: [
+      { media: 'assets/media/odyssey-cgi.png', caption: 'The Odyssey · CGI', lines: 2 },
+      { media: 'assets/media/odyssey-bts.jpeg', caption: 'The Odyssey · Kamera arkası', lines: 3 }
+    ],
     silhouettes: 'none'
   },
   { /* 24 */

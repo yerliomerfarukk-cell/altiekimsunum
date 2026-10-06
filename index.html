@@ -148,6 +148,10 @@
   .m { position: relative; flex: none; margin: 0; }
   .m img, .m video { display: block; width: 100%; height: 100%; object-fit: cover; }
   .m.photo .ink { width: 100%; height: 100%; -webkit-mask: var(--ink) center / 100% 100% no-repeat; mask: var(--ink) center / 100% 100% no-repeat; }
+  /* aşamalı fotoğraf: katmanlar üst üste; üsttekilerin içi (.blot) ortadan yayılan mürekkep lekesiyle açılır (maske boyu 0 → kapalı) */
+  .m.staged .ink { position: absolute; inset: 0; }
+  .m.staged .blot { width: 100%; height: 100%; -webkit-mask: var(--blot) center / 0 0 no-repeat; mask: var(--blot) center / 0 0 no-repeat; }
+  .m.staged.morph { transition: width 1.1s cubic-bezier(.45, 0, .2, 1), height 1.1s cubic-bezier(.45, 0, .2, 1); }
   .m figcaption { position: absolute; left: 0; right: 0; top: 100%; margin-top: 16px; text-align: center; font: 400 15px/1.3 var(--font-mono); letter-spacing: .18em; text-transform: uppercase; }
   .m.video video { border-radius: 6px; }
   .m.video:not(.phone) { outline: 1px solid currentColor; outline-offset: 9px; }
@@ -1676,6 +1680,25 @@ function makeInkMasks() {
     }
     INK.push(`url(${c.toDataURL()})`);
   }
+  // Geçiş lekesi: ortadan yayılan düzensiz mürekkep damlası (aşamalı fotoğraflar, bkz. makeStaged)
+  const n = 512, c = mkCanvas(n, n), g = c.getContext('2d'), rnd = mulberry32(77), K = 360;
+  g.fillStyle = '#000';
+  if ('filter' in g) g.filter = 'blur(2.5px)';
+  g.beginPath();
+  for (let i = 0; i < K; i++) {
+    const a = i / K * TAU, cs = Math.cos(a), sn = Math.sin(a);
+    const r = n * .4 * (1 + .09 * Noise(cs * 1.6, sn * 1.6, 7) + .04 * Noise(cs * 5, sn * 5, 9) + .015 * Noise(cs * 15, sn * 15, 11));
+    i ? g.lineTo(n / 2 + cs * r, n / 2 + sn * r) : g.moveTo(n / 2 + cs * r, n / 2 + sn * r);
+  }
+  g.closePath();
+  g.fill();
+  for (let i = 0; i < 26; i++) {                         // lekenin çevresine sıçrayan damlalar
+    const a = rnd() * TAU, r = n * (.4 + rnd() * .07);
+    g.beginPath();
+    g.arc(n / 2 + Math.cos(a) * r, n / 2 + Math.sin(a) * r, 2 + rnd() * rnd() * 10, 0, TAU);
+    g.fill();
+  }
+  document.documentElement.style.setProperty('--blot', `url(${c.toDataURL()})`);
 }
 const PHONE_AR = .62;                                   // telefon çerçevesinin en geniş hali; daha geniş video içine sığdırılır
 function makeMedia(item, o) {
@@ -1714,9 +1737,52 @@ function makeMedia(item, o) {
   if (item.caption) m.append(h('figcaption', null, item.caption));
   return m;
 }
+/* Aşamalı fotoğraf: aynı çerçevede üst üste katmanlar, hepsi aynı mürekkep kenar maskesiyle. Her aşamada sıradaki
+   görsel ortadan yayılan bir mürekkep lekesiyle açılır (geri: leke toplanır); açıklama birlikte değişir ve çerçeve
+   o anki görselin oranına yumuşakça uyar. Aşama, applySteps üzerinden adımla birlikte ilerler. */
+const BLOT_MAX = 2.3;                                   // lekenin köşeleri de örttüğü ölçek
+function makeStaged(items) {
+  items = items.map(it => (typeof it === 'string' ? { src: it } : it));
+  const m = h('figure', 'm photo staged'), layers = [], caps = [], edge = INK[items[0].src.length % INK.length];
+  let cur = 0;
+  const refit = () => { m.dataset.ar = layers[cur].ar; if (m.parentNode) fitMedia(m.parentNode); };
+  items.forEach((item, k) => {
+    const img = h('img', null, null, { src: encodeURI(item.src), alt: '', draggable: 'false' });
+    const ink = h('div', 'ink', k ? h('div', 'blot', img) : img);
+    ink.ar = item.portrait ? 3 / 4 : 4 / 3;
+    img.addEventListener('load', () => { ink.ar = img.naturalWidth / img.naturalHeight; if (k === cur) refit(); });
+    img.addEventListener('error', () => ink.replaceChildren(h('div', 'ph', [h('b', null, '?'), item.src])));
+    ink.style.setProperty('--ink', edge);
+    ink._blot = { s: 0 };
+    layers.push(ink);
+    caps.push(item.caption ? h('figcaption', null, item.caption) : null);
+  });
+  m.append(...layers, ...caps.filter(Boolean));
+  m._stage = (n, animate) => {
+    cur = clamp(n, 0, layers.length - 1);
+    layers.forEach((l, k) => {
+      if (!k) return;
+      const on = k <= cur, b = l._blot;
+      const put = () => {
+        const z = (b.s * 100).toFixed(2) + '%', st = l.firstChild.style;
+        st.webkitMaskSize = st.maskSize = z + ' ' + z;
+        l.style.visibility = b.s > .001 ? 'visible' : 'hidden';
+      };
+      gsap.killTweensOf(b);
+      if (animate) gsap.to(b, { s: on ? BLOT_MAX : 0, duration: 1.3, ease: on ? 'power2.out' : 'power2.in', onUpdate: put });
+      else b.s = on ? BLOT_MAX : 0;
+      put();
+    });
+    caps.forEach((c, k) => c && gsap.to(c, { opacity: k === cur ? 1 : 0, duration: animate ? .7 : 0, delay: animate && k === cur ? .3 : 0, overwrite: true }));
+    m.classList.toggle('morph', !!animate);
+    refit();
+  };
+  m._stage(0, false);
+  return m;
+}
 /* rect = [sol, üst, genişlik, yükseklik]; öğeler oranları korunarak yan yana sığdırılır */
 function mediaBox(items, rect, o) {
-  const box = h('div', 'mbox', [].concat(items).map(it => makeMedia(it, o)), IN);
+  const box = h('div', 'mbox', [].concat(items).map(it => (it instanceof Element ? it : makeMedia(it, o))), IN);
   Object.assign(box.style, { left: rect[0] + 'px', top: rect[1] + 'px', width: rect[2] + 'px', height: rect[3] + 'px' });
   box.dataset.w = rect[2]; box.dataset.h = rect[3];
   fitMedia(box);
@@ -1804,13 +1870,16 @@ const TYPES = {
 
   /* 4 — Medya: solda başlık + satırlar, sağda fotoğraf ya da video; caption: medya altı mono açıklama */
   media: {
-    steps: s => (s.stepwise === true ? (s.lines || []).length : 0),
+    steps: s => (s.stages ? s.stages.length - 1 : s.stepwise === true ? (s.lines || []).length : 0),
     build(s, w, o) {
-      const sw = s.stepwise === true;
+      const st = s.stages, sw = !st && s.stepwise === true;
+      // stages: i. satır, "lines" sayısı onu kapsayan ilk aşamada açılır (ilk aşamadakiler sayfayla birlikte gelir)
+      const stepOf = i => (st ? Math.max(0, st.findIndex(g => g.lines == null || g.lines > i)) : sw ? i + 1 : 0);
+      const media = st ? makeStaged(st.map(g => withCaption(g.media, g.caption))) : s.media && withCaption(s.media, s.caption);
       return h('div', 'slide t-media', [
         leftCol([s.kicker && h('div', 'kicker', s.kicker, IN), h('h1', null, s.heading || s.title, IN), s.sub && h('p', 'txt', s.sub, IN),
-          h('ul', 'lines', (s.lines || []).map((t, i) => h('li', null, t, sw ? { 'data-step': i + 1 } : IN)))], 770),
-        s.media && mediaBox(withCaption(s.media, s.caption), [860, 165, 930, 760], o)
+          h('ul', 'lines', (s.lines || []).map((t, i) => h('li', null, t, stepOf(i) ? { 'data-step': stepOf(i) } : IN)))], 770),
+        media && mediaBox(media, [860, 165, 930, 760], o)
       ]);
     }
   },
@@ -1999,6 +2068,7 @@ function applySteps(el, step, animate) {
       n.querySelectorAll('.brush').forEach(b => track(el, Brush.draw(b, .5, .12)));
     } else track(el, gsap.to(n, { opacity: 0, x: 40, duration: .3, ease: 'power2.in', overwrite: true }));
   });
+  el.querySelectorAll('.m.staged').forEach(m => m._stage(step, animate));
 }
 function fit(root) {
   const tall = root.querySelectorAll('[data-fitv]');
