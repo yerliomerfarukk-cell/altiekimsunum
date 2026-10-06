@@ -1,0 +1,2618 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DinamİK — Medya ve İletişim</title>
+
+<!-- Yazı tipleri ve tüm scriptler yerelden yüklenir (assets/fonts, assets/vendor): sunum internetsiz çalışır.
+     Yeniden indirmek için: python tools/build_vendor.py -->
+<link href="assets/fonts/fonts.css" rel="stylesheet">
+
+<style>
+  /* Renk ve süre değerleri JS'teki CONFIG nesnesinden buraya yazılır (applyConfig);
+     aşağıdakiler yalnızca JS çalışmadan önceki varsayılanlardır. */
+  :root {
+    --black: #000000;
+    --white: #ffffff;
+    --paper: #f4f1ea;
+    --gold: #ffc65a;
+    --gold-hi: #fff0c4;
+    /* Shippori Mincho denendi: İ, ı, ş, ğ gliflerini içermiyor; başlık Instrument Serif'te kaldı. */
+    --font-display: 'Instrument Serif', 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+    --font-text: 'Inter Tight', 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, 'Courier New', monospace;
+    --pad-x: 130px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--black); overflow: hidden; }
+
+  /* ---------- 16:9 sahne: sabit 1920x1080, JS ile ekrana ölçeklenir (letterbox) ---------- */
+  #stage {
+    position: absolute; left: 50%; top: 50%;
+    width: 1920px; height: 1080px;
+    overflow: hidden; background: var(--black);          /* A zemini */
+    user-select: none; -webkit-user-select: none;
+  }
+  #stage canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; display: block; pointer-events: none; }
+
+  /* ---------- İKİ KATMAN ----------
+     Beyaz katman siyah zeminin, siyah katman beyaz zeminin üstündedir. Hiçbirinin
+     opaklığı değişmez; yalnızca #hole'un (beyaz zemin) kırpma alanı değişir.
+     Siyah katman beyaz zeminle birlikte kırpılır: aksi halde A'da görünmez siyah
+     metin, aynı konumdaki beyaz metni örterdi. */
+  .layer { position: absolute; inset: 0; overflow: hidden; }
+  .world-dark  { color: var(--white); --ground: var(--black); }
+  .world-light { color: var(--black); --ground: var(--paper); }
+  #hole { background: var(--paper); clip-path: circle(0px at 50% 50%); }
+  .slides, .slide { position: absolute; inset: 0; }
+  .slide { pointer-events: none; }
+
+  /* Siyah dünyanın zemini: suya damlamış mürekkep gibi çok yavaş kayan iki duman katmanı */
+  .smoke {
+    position: absolute; left: -1024px; top: -1024px; width: 2944px; height: 2104px;
+    background-size: 1024px 1024px; will-change: transform;
+  }
+  .smoke.s1 { opacity: .07; animation: smoke1 260s linear infinite; }
+  .smoke.s2 { opacity: .05; background-position: 380px 610px; animation: smoke2 420s linear infinite; }
+  @keyframes smoke1 { to { transform: translate(1024px, 0); } }
+  @keyframes smoke2 { to { transform: translate(1024px, 1024px); } }
+
+  /* Yin-yang tohumu: yüzüğün doğduğu nokta. A'da beyaz, B'de siyah; yalnızca reversed sayfalarda görünür. */
+  .seed { position: absolute; left: 960px; top: 540px; width: 7px; height: 7px; margin: -3.500px; border-radius: 50%; background: currentColor; opacity: 0; transition: opacity .6s; }
+  #stage[data-type="reversed"] .seed { opacity: 1; }
+
+  .col { position: absolute; left: var(--pad-x); top: 150px; width: 820px; }
+  .col .label { font: 500 17px/1.4 var(--font-mono); letter-spacing: .26em; text-transform: uppercase; }
+  .col .title {
+    display: inline-block; white-space: nowrap; margin: 14px 0 0 -8px;
+    font: 400 232px/.86 var(--font-display); letter-spacing: -.02em;
+  }
+  .col .sub { margin-top: 26px; font: 400 32px/1.25 var(--font-text); }
+  .col .points { list-style: none; margin-top: 44px; }
+  .col .points li { display: flex; align-items: baseline; gap: 26px; margin-bottom: 14px; font: 500 40px/1.15 var(--font-text); }
+  .col .points .n { flex: none; width: 34px; font: 400 16px/1 var(--font-mono); letter-spacing: .08em; }
+  .col .stat { margin-top: 24px; padding-left: 60px; font: 400 16px/1.4 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+  .col .dialog { margin-top: 30px; padding-left: 60px; }
+  .col .dialog p { font: italic 400 34px/1.36 var(--font-display); white-space: nowrap; }
+  .type .off { visibility: hidden; }
+
+  /* ---------- Üst / alt bilgi satırları: her iki zeminde okunur ---------- */
+  .bar {
+    position: absolute; left: var(--pad-x); right: var(--pad-x);
+    display: flex; align-items: center; justify-content: space-between;
+    font: 400 16px/1 var(--font-mono); letter-spacing: .2em; text-transform: uppercase;
+    color: #fff; mix-blend-mode: difference; pointer-events: none;
+  }
+  #top { top: 48px; right: 490px; padding-bottom: 14px; border-bottom: 1px solid #fff; }   /* sağ uç, köşedeki dalın başladığı yerde biter */
+  #bottom { bottom: 40px; padding-top: 14px; border-top: 1px solid #fff; }
+  #bottom > * { flex: 1; }
+  #bottom .course { text-transform: none; }
+  #bottom .mid { text-align: center; white-space: nowrap; visibility: hidden; }
+  #stage[data-type="reversed"] #bottom .mid { visibility: visible; }
+  .mark { display: flex; align-items: center; gap: 14px; }
+  #bottom .mark { justify-content: flex-end; }
+  .enso { flex: none; width: 30px; height: 30px; overflow: visible; }
+
+  /* ---------- Altın yüzük ---------- */
+  #glow { mix-blend-mode: screen; visibility: hidden; }     /* yalnızca ışıltı; siyah zemin "screen" ile kaybolur */
+
+  /* ---------- Köşe kontrolleri ---------- */
+  .ui-btn {
+    position: absolute; bottom: 2px; width: 40px; height: 40px;
+    display: grid; place-items: center;
+    background: none; border: 0; outline: 0; cursor: pointer;
+    opacity: .8;
+  }
+  .ui-btn:hover, .ui-btn:focus-visible { opacity: 1; }
+  #ring { right: 34px; transition: opacity .4s; }
+  #stage:not([data-type="reversed"]) #ring { opacity: .22; pointer-events: none; }
+  #ring svg { width: 28px; height: 28px; overflow: visible; }
+  #sound { right: 76px; color: #fff; mix-blend-mode: difference; }
+  #sound svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+  #sound .off { display: none; }
+  #sound.muted .on { display: none; }
+  #sound.muted .off { display: inline; }
+  #sound.muted { opacity: .45; }
+  #nolib {
+    display: none; position: absolute; inset: 0; place-items: center; text-align: center;
+    font: 500 30px var(--font-text); color: #fff; background: #000;
+  }
+
+  /* =====================================================================
+     SAYFA TİPLERİ — tüm ölçüler 1920x1080 sahneye göre; renk katmandan (currentColor) gelir
+     ===================================================================== */
+  .kicker { font: 500 17px/1.4 var(--font-mono); letter-spacing: .26em; text-transform: uppercase; }
+  .dim { color: color-mix(in srgb, currentColor 66%, transparent); }
+  .brush { overflow: visible; }
+
+  /* --- cover --- */
+  .t-cover .sub { font: 400 34px/1.3 var(--font-text); }
+
+  /* --- section --- */
+
+  /* --- statement --- */
+  .t-statement { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 200px 20px; }
+  .t-statement .q { margin-top: 30px; font: 400 112px/1.04 var(--font-display); letter-spacing: -.015em; }
+  .t-statement .q span { display: inline-block; }
+  .t-statement .sub { margin-top: 46px; font: 400 32px/1.3 var(--font-text); }
+
+  /* --- ortak: sol metin sütunu + medya kutusu --- */
+  .lcol { position: absolute; left: 130px; top: 150px; bottom: 130px; width: 640px; display: flex; flex-direction: column; justify-content: center; }
+  .lcol h1 { font: 400 112px/.95 var(--font-display); letter-spacing: -.02em; white-space: pre-line; margin: 18px 0 34px -4px; }
+  .lcol .lines { list-style: none; }
+  .lcol .lines li { position: relative; padding-left: 46px; margin-bottom: 16px; font: 400 34px/1.3 var(--font-text); }
+  .lcol .lines li::before { content: ''; position: absolute; left: 0; top: .64em; width: 26px; height: 1.5px; background: currentColor; }
+  .lcol .txt { font: 400 34px/1.36 var(--font-text); }
+  .mbox { position: absolute; display: flex; align-items: center; justify-content: center; gap: 44px; }
+  .m { position: relative; flex: none; margin: 0; }
+  .m img, .m video { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .m.photo .ink { width: 100%; height: 100%; -webkit-mask: var(--ink) center / 100% 100% no-repeat; mask: var(--ink) center / 100% 100% no-repeat; }
+  .m figcaption { position: absolute; left: 0; right: 0; top: 100%; margin-top: 16px; text-align: center; font: 400 15px/1.3 var(--font-mono); letter-spacing: .18em; text-transform: uppercase; }
+  .m.video video { border-radius: 6px; }
+  .m.video:not(.phone) { outline: 1px solid currentColor; outline-offset: 9px; }
+  .m.phone { border: 2px solid currentColor; border-radius: 46px; padding: 10px; }
+  .m.phone video, .m.phone .ph { border-radius: 34px; }
+  .m.phone video { object-fit: contain; background: #000; }          /* kareye yakın video ekrana sığdırılır */
+  .m.phone::before { content: ''; position: absolute; left: 50%; top: 22px; z-index: 1; width: 76px; height: 17px; margin-left: -38px; border-radius: 9px; background: #000; box-shadow: 0 0 0 1px rgba(255,255,255,.22); }
+  .m .ph { width: 100%; height: 100%; display: grid; place-items: center; align-content: center; gap: 14px; text-align: center; border: 1.5px dashed currentColor; font: 400 15px/1.4 var(--font-mono); letter-spacing: .12em; padding: 20px; overflow: hidden; word-break: break-all; }
+  .m .ph b { font: 400 56px/1 var(--font-display); }
+
+  /* --- list --- */
+
+  /* --- recipe: Japon tarif kartı --- */
+  .t-recipe .card { position: absolute; left: 130px; top: 140px; right: 130px; bottom: 120px; border: 1.5px solid currentColor; }
+  .t-recipe .card::before { content: ''; position: absolute; inset: 9px; border: 1px solid color-mix(in srgb, currentColor 45%, transparent); pointer-events: none; }
+  .t-recipe .vt { position: absolute; left: 0; top: 0; bottom: 0; width: 250px; display: flex; align-items: center; justify-content: center; border-right: 1.5px solid currentColor; }
+  .t-recipe .body { position: absolute; left: 310px; top: 46px; right: 70px; bottom: 40px; display: flex; flex-direction: column; }
+  .t-recipe .meta { display: flex; gap: 46px; padding-bottom: 20px; border-bottom: 1px solid currentColor; font: 400 15px/1.3 var(--font-mono); letter-spacing: .2em; text-transform: uppercase; }
+  .t-recipe li span { display: block; margin-top: 6px; font: 400 26px/1.3 var(--font-text); }
+
+  /* --- tip: Püf Noktası --- */
+  .hanko {
+    position: absolute; left: 130px; top: 150px; width: 158px; height: 158px; border-radius: 10px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: currentColor; transform: rotate(-4deg); filter: url(#roughPx);
+  }
+  .hanko::before { content: ''; position: absolute; inset: 9px; border: 2.5px solid var(--ground); border-radius: 4px; }
+  .hanko b { color: var(--ground); font: 400 62px/.86 var(--font-display); letter-spacing: .08em; margin-right: -.08em; }
+  .hanko i { color: var(--ground); margin-top: 10px; font: 500 21px/1 var(--font-text); font-style: normal; letter-spacing: .15em; margin-right: -.15em; }
+  .t-tip .lcol { top: 352px; justify-content: flex-start; }
+
+  /* --- instagram --- */
+  .t-instagram .lcol { width: 540px; }
+  .t-instagram .handle { margin-top: 26px; font: 400 22px/1.3 var(--font-mono); letter-spacing: .1em; }
+  .igphone { position: absolute; left: 758px; top: 126px; width: 404px; height: 828px; border: 3px solid currentColor; border-radius: 58px; }
+  .igphone::after { content: ''; position: absolute; left: 50%; top: 22px; width: 96px; height: 26px; margin-left: -48px; border-radius: 14px; background: #000; box-shadow: 0 0 0 1px rgba(255,255,255,.2); }
+  .qr { position: absolute; left: 1340px; top: 300px; width: 400px; text-align: center; }
+  .qr .plate { margin: 18px 0 20px; padding: 16px; background: #fff; border: 1.5px solid currentColor; }
+  .qr .plate svg { display: block; width: 100%; }
+  .qr .plate .nolib { aspect-ratio: 1; display: grid; place-items: center; padding: 30px; color: #000; font: 400 20px/1.4 var(--font-mono); word-break: break-all; }
+  .qr .url { font: 400 16px/1.4 var(--font-mono); letter-spacing: .08em; }
+
+  /* --- closing --- */
+  .t-closing .line { position: absolute; left: 0; right: 0; top: 838px; text-align: center; font: 400 74px/1.05 var(--font-display); letter-spacing: -.01em; }
+  .t-closing .sub { position: absolute; left: 0; right: 0; top: 942px; text-align: center; }
+  .t-closing .still { position: absolute; left: 600px; top: 100px; width: 720px; height: 720px; }
+
+  /* --- reversed: A tarafındaki isteğe bağlı medya --- */
+  .t-reversed .mbox { left: 1010px; top: 170px; width: 780px; height: 540px; }
+
+  /* =====================================================================
+     ORTAK ÖĞELER — ilerleme çizgisi, "git" göstergesi, önizleme ızgarası, sunucu görünümü
+     ===================================================================== */
+  #fx { visibility: hidden; }
+  #progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; display: flex; gap: 7px; mix-blend-mode: difference; pointer-events: none; }
+  #progress i { position: relative; flex: var(--n) 1 0; overflow: hidden; background: rgba(255,255,255,.2); }
+  #progress b { position: absolute; inset: 0; background: #fff; transform-origin: 0 50%; transform: scaleX(var(--p, 0)); transition: transform .7s cubic-bezier(.3,.7,.2,1); }
+  #hud {
+    display: none; position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); padding: 12px 22px;
+    font: 500 20px/1 var(--font-mono); letter-spacing: .2em; text-transform: uppercase;
+    color: #fff; border: 1px solid #fff; mix-blend-mode: difference; pointer-events: none;
+  }
+
+  .thumb { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #000; }
+  .mini { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0; transform: scale(var(--k, .16)); }
+  .mini.world-dark { background: var(--black); }
+  .mini.world-light { background: var(--paper); }
+  .mini canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+
+  #overview { display: none; position: fixed; inset: 0; z-index: 50; overflow: auto; padding: 44px 48px; background: rgba(6,6,6,.97); }
+  #overview.open { display: block; }
+  #overview .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 30px 26px; }
+  .ov { cursor: pointer; color: #fff; }
+  .ov .thumb { outline: 1px solid rgba(255,255,255,.22); transition: outline-color .2s; }
+  .ov:hover .thumb { outline-color: #fff; }
+  .ov.cur .thumb { outline: 2px solid var(--gold); }
+  .ov > p { margin-top: 10px; display: flex; gap: 12px; font: 400 12px/1.3 var(--font-mono); letter-spacing: .14em; text-transform: uppercase; opacity: .75; }
+  .ov.cur > p { opacity: 1; color: var(--gold); }
+  .ov > p span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+  body.presenter #stage, body.presenter #overview { display: none; }
+  #pv { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; gap: 22px; padding: 26px 32px; background: #0a0a0a; color: #fff; font-family: var(--font-text); }
+  #pv header, #pv footer { display: flex; align-items: center; gap: 30px; font: 400 14px/1 var(--font-mono); letter-spacing: .18em; text-transform: uppercase; }
+  #pv header .pg { font-size: 24px; letter-spacing: .1em; }
+  #pv header .sp { flex: 1; }
+  #pv header .stp { color: var(--gold); }
+  #pv .timer { font: 500 30px/1 var(--font-mono); letter-spacing: .06em; color: var(--gold); background: none; border: 0; cursor: pointer; }
+  #pv .clock { font-size: 20px; opacity: .7; }
+  #pv main { display: grid; grid-template-columns: 1.65fr 1fr; gap: 30px; min-height: 0; }
+  #pv main > * { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  #pv label { display: block; margin: 0 0 10px; font: 400 12px/1 var(--font-mono); letter-spacing: .24em; text-transform: uppercase; opacity: .55; }
+  #pv .thumb { flex: none; outline: 1px solid rgba(255,255,255,.2); }
+  #pv .notes { flex: 1; min-height: 0; overflow: auto; margin-top: 4px; font: 400 23px/1.5 var(--font-text); white-space: pre-wrap; }
+  #pv label.nl { margin-top: 24px; }
+  #pv footer { justify-content: space-between; font-size: 12px; }
+  #pv footer span { opacity: .5; }
+  #pv footer button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; background: none; border: 1px solid rgba(255,255,255,.5); padding: 10px 18px; margin-left: 10px; cursor: pointer; }
+
+  /* =====================================================================
+     DÜZELTMELER + YENİ SAYFA ÖĞELERİ
+     ===================================================================== */
+  /* Tüm medya gri ton + hafif kontrast (CONFIG.mediaColor = true → özgün renkler) */
+  .m img, .m video, .ig-shot { filter: grayscale(1) contrast(1.15); }
+  .media-color .m img, .media-color .m video, .media-color .ig-shot { filter: none; }
+
+  /* --- cover: ensō metnin ARKASINDA, soluk bir mürekkep izi; başlık her zaman tam okunur --- */
+  .t-cover .big-enso { position: absolute; left: 440px; top: 20px; width: 1040px; height: 1040px; opacity: .36; }
+  .world-light .t-cover .big-enso { opacity: .26; }
+  .t-cover .txt { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .t-cover h1 { font: 400 150px/.9 var(--font-display); letter-spacing: -.02em; white-space: pre-line; margin: 26px 0 34px; }
+
+  /* --- section (alt şeritteki kalabalığa yer bırakır) --- */
+  .t-section .num { position: absolute; left: 112px; top: 150px; height: 360px; }
+  .t-section .kicker { position: absolute; left: 130px; top: 556px; }
+  .t-section h1 { position: absolute; left: 122px; top: 588px; font: 400 150px/1 var(--font-display); letter-spacing: -.02em; white-space: nowrap; }
+  .t-section .intro { position: absolute; left: 130px; top: 772px; width: 1000px; font: 400 34px/1.35 var(--font-text); }
+
+  /* --- statement çeşitleri --- */
+  .t-statement .q.big { font-size: 330px; line-height: .9; }
+  .t-statement .q.long { font-size: 84px; line-height: 1.08; }
+  .t-statement.with-ring { padding-top: 250px; }
+
+  /* --- media / tip sol sütun --- */
+  .lcol .in { transform-origin: 0 50%; }
+  .lcol .lines { margin-top: 26px; }
+  .lcol .txt + .lines { margin-top: 30px; }
+  .t-media .lcol h1 { font-size: 96px; margin-bottom: 26px; }
+  .t-tip .lcol .in { transform-origin: 0 0; }
+  .t-tip .lcol h1 { font-size: 94px; margin: 0 0 28px -4px; }
+  .t-tip.wide .lcol { width: 1250px; }
+  .quote { font: italic 400 76px/1.1 var(--font-display); letter-spacing: -.01em; }
+  .t-tip .quote { margin-top: 50px; }
+  .col .quote { margin-top: 46px; font-size: 66px; }
+  .t-instagram .lcol h1 { font-size: 104px; }
+
+  /* --- list: başlık, alt başlık ve maddeler tek akışta --- */
+  .t-list .flow { position: absolute; left: 130px; top: 150px; width: 1400px; transform-origin: 0 0; }
+  .t-list h1 { display: inline-block; margin-left: -8px; font: 400 124px/1 var(--font-display); letter-spacing: -.02em; white-space: nowrap; }
+  .t-list .sub { margin-top: 20px; max-width: 1000px; font: 400 32px/1.32 var(--font-text); }
+  .t-list ol { margin-top: 50px; width: 1000px; list-style: none; }
+  .t-list li { display: flex; align-items: baseline; gap: 30px; margin-bottom: 26px; font: 500 44px/1.18 var(--font-text); }
+  .t-list .n { flex: none; width: 46px; font: 400 18px/1 var(--font-mono); letter-spacing: .08em; }
+  .t-list li b { font-weight: 500; }
+  .t-list li em { display: block; margin-top: 6px; font: 400 29px/1.3 var(--font-text); }
+  .t-list .foot { margin-top: 44px; padding-left: 76px; }
+  .t-list.cols ol { columns: 2; column-gap: 70px; }
+  .t-list.cols li { break-inside: avoid; }
+  .t-list.chain ol { display: flex; flex-wrap: wrap; align-items: baseline; gap: 22px 34px; width: 1400px; margin-top: 64px; }
+  .t-list.chain li { margin: 0; gap: 34px; font: 400 80px/1.05 var(--font-display); letter-spacing: -.01em; }
+  .t-list.chain .n { width: auto; font: 400 62px/1 var(--font-display); }
+  .t-list.chain .n:empty { display: none; }
+
+  /* --- reversed: uzun içerik için sıkı dizgi (fit() ekler) --- */
+  .col { transform-origin: 0 0; }
+  .col.dense { width: 1000px; }
+  .col.dense .title { font-size: 150px; }
+  .col.dense .sub { margin-top: 20px; font-size: 28px; }
+  .col.dense .points { margin-top: 32px; }
+  .col.dense .points li { margin-bottom: 13px; font-size: 31px; line-height: 1.22; }
+  .col.dense .quote { font-size: 54px; }
+
+  /* =====================================================================
+     DÜZELTMELER 2 — reversed göstergesi ve boşlukları, tarif kartı, Instagram
+     ===================================================================== */
+  /* Alt bilgideki dünya göstergesi: satır "difference" karışımıyla çizildiği için siyah zeminde beyaz,
+     beyaz zeminde siyah görünür; etkin dünya tam, öbürü %40 opaklıkta */
+  #bottom .mid span, #bottom .mid i { opacity: .4; }
+  #stage[data-world="A"] #bottom .mid .ia, #stage[data-world="B"] #bottom .mid .ib { opacity: 1; }
+  #bottom .mid i { font-style: normal; margin: 0 .7em; }
+
+  /* Büyük başlığın kuyruklu harfleri (p, y, g, ş, ğ) alt başlığa değmesin */
+  .col .sub { margin-top: 58px; }
+  .col.dense .sub { margin-top: 40px; }
+  /* 4'ten fazla madde: daha geniş sütun, daha küçük punto */
+  .col.many { width: 1000px; }
+  .col.many .points { margin-top: 34px; }
+  .col.many .points li { margin-bottom: 12px; font-size: 32px; line-height: 1.22; }
+
+  /* Tarif: başlık tek satır, 90° döndürülmüş, aşağıdan yukarı okunur */
+  .t-recipe .vt h1 { writing-mode: vertical-rl; white-space: nowrap; font: 400 104px/1 var(--font-display); letter-spacing: -.01em; }
+  .t-recipe .vt h1 span { display: inline-block; transform: rotate(180deg); }
+  /* Adımlar eşit yükseklikte satırlar; rakam ve metin (iki satır olsa da) satırın ortasında */
+  .t-recipe ol { list-style: none; flex: 1; display: flex; flex-direction: column; }
+  .t-recipe li { flex: 1 1 0; min-height: 0; display: flex; align-items: center; gap: 38px; }
+  .t-recipe li svg { flex: none; display: block; width: 64px; height: 90px; }
+  .t-recipe li > div { display: flex; flex-direction: column; justify-content: center; }
+  .t-recipe li b { display: block; font: 500 40px/1.2 var(--font-text); }
+
+  /* Instagram: telefonun ekranında profilin ekran görüntüsü (bir ya da alt alta iki görsel) */
+  .ig { position: absolute; inset: 9px; border-radius: 46px; overflow: hidden; background: #000; }
+  .ig-shot { position: absolute; inset: 0; overflow: hidden; }
+  .ig-scroll { will-change: transform; }
+  .ig-scroll img { display: block; width: 100%; }
+  .ig-scroll.single { height: 100%; display: flex; flex-direction: column; }
+  .ig-scroll.single img { flex: 1; min-height: 0; object-fit: cover; object-position: 50% 0; }      /* tek görsel: ekranı kaplar, üstten hizalı */
+  .ig-empty { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 28px; background: var(--ground); font: 400 17px/1 var(--font-mono); letter-spacing: .1em; }
+  .ig-empty svg { width: 150px; height: 150px; }
+  .qr .plate img { display: block; width: 100%; }
+</style>
+</head>
+<body>
+
+<!-- Fırça kenarı pürüzü: rakamlar (kullanıcı birimi) ve mühür (piksel) için; #probe: yol örnekleme -->
+<svg id="defs" width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="rough" x="-15%" y="-15%" width="130%" height="130%">
+      <feTurbulence type="fractalNoise" baseFrequency=".11" numOctaves="2" seed="4"/>
+      <feDisplacementMap in="SourceGraphic" scale="4.5" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="roughPx" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency=".05" numOctaves="2" seed="9"/>
+      <feDisplacementMap in="SourceGraphic" scale="7" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <path id="probe" d=""/>
+</svg>
+
+<div id="stage" data-world="A" data-type="">
+  <!-- BEYAZ KATMAN — siyah zemin (mürekkep dumanı) üstünde beyaz içerik -->
+  <div class="layer world-dark" id="layerW">
+    <div class="smoke s1"></div>
+    <div class="smoke s2"></div>
+    <canvas id="cvW" width="1920" height="1080"></canvas>
+    <div class="slides" id="slidesW"></div>
+    <i class="seed"></i>
+  </div>
+
+  <!-- BEYAZ ZEMİN (washi; yüzüğün deliği / mürekkep lekesi) + SİYAH KATMAN -->
+  <div class="layer world-light" id="hole">
+    <canvas id="washi" width="1920" height="1080"></canvas>
+    <canvas id="cvB" width="1920" height="1080"></canvas>
+    <div class="slides" id="slidesB"></div>
+    <i class="seed"></i>
+  </div>
+
+  <!-- Kapanış: yin-yang bu tuvale, yüzüğün deliğine kırpılarak çizilir -->
+  <canvas id="fx" width="1920" height="1080"></canvas>
+
+  <div class="bar" id="top">
+    <span class="mark"><svg class="enso" viewBox="0 0 40 40"></svg><span class="section"></span></span>
+    <span class="concept"></span>
+  </div>
+  <div class="bar" id="bottom">
+    <span class="course">DinamİK · Medya ve İletişim</span>
+    <span class="mid"><span class="ia">Kitle İletişimi</span><i>/</i><span class="ib">Birebir İletişim</span></span>
+    <span class="mark"><svg class="enso" viewBox="0 0 40 40"></svg><span class="page"></span></span>
+  </div>
+  <div id="progress"></div>
+  <div id="hud"></div>
+
+  <!-- Altın yüzük: ışıltı (bloom) tuvali + şeffaf WebGL tuvali, en üst katman -->
+  <canvas id="glow"></canvas>
+  <canvas id="gl"></canvas>
+
+  <button class="ui-btn" id="sound" title="Ses aç/kapa (M)" aria-label="Ses aç/kapa">
+    <svg viewBox="0 0 24 24">
+      <path d="M4 9.500h3.500L12 6v12l-4.500-3.500H4z"/>
+      <path class="on" d="M15.500 9.200a4 4 0 0 1 0 5.600M18 6.800a7.500 7.500 0 0 1 0 10.400"/>
+      <path class="off" d="M16 9.500l5 5M21 9.500l-5 5"/>
+    </svg>
+  </button>
+  <button class="ui-btn" id="ring" title="Dünyayı değiştir (R)" aria-label="Dünyayı değiştir">
+    <svg viewBox="0 0 48 48">
+      <circle cx="24" cy="24" r="16" fill="none" stroke="var(--gold)" stroke-width="6"/>
+      <circle cx="24" cy="24" r="17.500" fill="none" stroke="var(--gold-hi)" stroke-width="1.2" opacity=".85"/>
+    </svg>
+  </button>
+
+  <div id="nolib">GSAP yüklenemedi — assets/vendor/gsap.min.js dosyasını kontrol edin.</div>
+</div>
+
+<!-- O: tüm sayfaların önizleme ızgarası -->
+<div id="overview"><div class="grid"></div></div>
+
+<script src="assets/vendor/gsap.min.js"></script>
+<script src="assets/vendor/three-kit.js"></script>
+<!-- Görsellerin gömülü kopyaları + dosya listesi: bkz. bölüm 6 ve tools/embed_silhouettes.py -->
+<script src="assets/silhouettes/embedded.js"></script>
+<script src="assets/vendor/qrcode.min.js"></script>
+<!-- Tüm içerik: slides.js -->
+<script src="slides.js"></script>
+<script>
+/* =====================================================================
+   1) İÇERİK — slides.js içindeki SLIDES dizisinden gelir; bu dosya yalnızca motordur.
+      Sayfa tipleri: bölüm 15. Gezinme ve kısayollar: bölüm 18 ve 20.
+      Sayfa numarası URL'de tutulur:  index.html#12
+   ===================================================================== */
+
+/* =====================================================================
+   2) AYARLAR — tüm sunumun renk, süre ve hareket sistemi
+   ===================================================================== */
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+const CONFIG = {
+  colors: { black: '#000000', white: '#ffffff', paper: '#f4f1ea', gold: '#ffc65a', goldHi: '#fff0c4' },
+  dur: { toB: 2.6, toA: 1.4, blot: .95 },      // geçiş süreleri (sn): yüzük A→B, B→A; mürekkep lekesi
+  sprite: {
+    ext: ['png', 'jpg'],                       // embedded.js'teki listede olmayan dosyalar için sırayla denenir
+    maxH: 900,                                 // işlenen görselin en büyük yüksekliği (px)
+    lumaLo: 70, lumaHi: 215                    // eşik: ≤lo tam figür, ≥hi tam şeffaf, arası yumuşak kenar
+  },
+  // Tek global rüzgâr alanı: yapraklar, izler, dal ve figür kenarları hep bunu okur
+  wind: {
+    speed: 150,                                // esinti tam şiddetteyken ana akış (px/sn, soldan sağa)
+    calm: .36, breath: .22,                    // sakin andaki şiddet + çok yavaş soluk alıp verme
+    gust: 1.0, gustEvery: [4, 8], gustDur: [2.4, 3.8], gustAmp: [.55, 1],   // esinti zarfı (sn)
+    front: 1500,                               // esinti cephesinin ekranı geçme hızı (px/sn)
+    curl: 26, curlScale: .0019, curlRate: .1,  // girdaplar: şiddet, uzamsal ölçek, zamanla değişim hızı
+    free: 12,                                  // serbest akan fırça izi sayısı
+    figTrails: [6, 18], figTrailDensity: .012, // figür izleri: [min, max] ve figür yüksekliği başına iz
+    trailLife: [3.2, 6],                       // bir figür izinin ömrü (sn)
+    ripple: .0032,                             // figür kenarı dalgalanması (yüksekliğe oran, tam esintide)
+    strip: 4                                   // dalgalanma şeridi kalınlığı (px)
+  },
+  leaves: {
+    count: 16,
+    names: [['maple-leaf', 'momiji'], ['gingko-leaf', 'ginkgo'], ['bamboo-leaf']],   // assets/nature/
+    size: [18, 70],                            // uzak → yakın (px)
+    gravity: 40, drag: 2.0, sway: 150         // yerçekimi (px/sn²), hava direnci (1/sn), salınım kuvveti
+  },
+  branch: {
+    names: ['black-pine-branch', 'pine-branch', 'bamboo-branch'],                    // assets/nature/; kök görselin solunda
+    corner: 'right', width: 470, y: -112, overhang: 20,
+    bend: -.085, flutter: .02, stiff: 14, damp: 1.5, slices: 16
+  },
+  perf: { minFps: 50, minTrail: .3, minLeaves: 8 },   // kare hızı düşerse önce izler, sonra yapraklar azalır
+  safe: { pad: 20, soft: 26 },                 // metin güvenli alanı: metnin çevresindeki pay ve kenar yumuşaklığı (px)
+  mediaColor: false,                           // false: tüm fotoğraf ve videolar gri ton + hafif kontrast; true: özgün renkler
+  // Silüet yerleşim düzenleri (preset). slides.js'te:  silhouettes: "crowd" | "solo:<dosya>" | "pair:<d1>,<d2>" | "none"
+  silhouettes: {
+    // slides.js'te geçen ad → assets/silhouettes/ içindeki dosya. Burada olmayan ad için en çok ortak sözcüğü olan dosya seçilir.
+    alias: {
+      'walker-phone': 'walking-person', 'suit-man': 'man-suit', 'suit-woman': 'woman-suit',
+      'student-backpack': 'man-student', 'student-books': 'female-student',
+      'academic-man': 'male-academic', 'academic-woman': 'woman-suit'
+    },
+    facing: { 'walking-person': 'left', 'male-academic': 'right', 'man-student': 'right' },   // figürün baktığı yön (yazılmayan: cepheden)
+    ground: 962,                               // büyük figürlerin ayak hizası
+    // crowd: figürler alt bilgi satırının çizgisinde durur
+    crowd: { sprites: ['calm-crowd', 'walking-person', 'man-student', 'calm-crowd', 'female-student', 'walking-person'],
+             from: 130, to: 1790, y: 1009, h: [84, 112], gap: [30, 72] },
+    solo: { x: 1560, scale: .58, xBonsai: 1240 },                 // bonsai varken figür ona yer açar
+    pair: { x: [1310, 1590], scale: [.56, .56] }
+  },
+  bonsai: { names: ['bonsai'], x: 1620, y: 962, h: 400, sway: .05, slices: 28 },   // assets/nature/bonsai.(png|jpg); yoksa yedek çizim
+  // Instagram sayfası: telefon ekranında assets/instagram/ içindeki profil ekran görüntüleri gösterilir
+  instagram: {
+    username: 'dinamikdigital',
+    url: 'https://www.instagram.com/dinamikdigital/',   // QR bu adres için üretildi (assets/instagram/qr.svg; değişirse: node tools/make_qr.js)
+    shots: ['profile-1', 'profile-2'],         // ikincisi varsa alt alta birleştirilir ve ekranda yavaşça kaydırılır
+    ext: ['png', 'jpg', 'jpeg', 'webp'],       // uzantısız adlar için sırayla denenir
+    crop: 0,                                   // ilk görselin üstünden kırpılacak piksel (ekran görüntüsünde telefonun durum çubuğu varsa)
+    inset: 42,                                 // görselin üstünde, çerçevenin çentiği için bırakılan boşluk (px); rengi: screenBg
+    screenBg: '#0c1014',                       // ilk görselin üst kenar rengi
+    scroll: 9                                  // bir yönde kaydırma süresi (sn)
+  },
+  ring: {
+    radius: 1, tube: .2, fov: 30, dist: 10,
+    metalness: 1, roughness: .08,
+    scale: [.26, 8.6],                         // tohumdan doğduğu boy → ekrandan taştığı boy
+    theta: [.35 * Math.PI, 2 * Math.PI],       // Y ekseninde ağır dönüş; yüz kameraya dönük biter
+    tilt: [.3, .07], roll: .1,
+    bloom: { strength: .14, radius: .5, threshold: .88 },
+    toA: 'emerge',                             // 'emerge': yüzük siyah tohumdan doğar | 'reverse': toB'nin tersi
+    segments: 96                               // delik çokgeninin köşe sayısı
+  }
+};
+// CONFIG tek kaynak: değerleri CSS değişkenlerine yaz
+function applyConfig() {
+  const s = document.documentElement.style, c = CONFIG.colors;
+  s.setProperty('--black', c.black);
+  s.setProperty('--white', c.white);
+  s.setProperty('--paper', c.paper);
+  s.setProperty('--gold', c.gold);
+  s.setProperty('--gold-hi', c.goldHi);
+  document.documentElement.classList.toggle('media-color', !!CONFIG.mediaColor);
+}
+
+/* =====================================================================
+   3) YARDIMCILAR + DOM
+   ===================================================================== */
+const $ = (s, root = document) => root.querySelector(s);
+const rand = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.random() * (b - a));
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const smooth = (a, b, v) => { const k = clamp((v - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
+const pad2 = n => String(n).padStart(2, '0');
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/* Küçük DOM kurucu: h('p', 'sınıf', metin | öğe | [öğeler], { öznitelikler }). Metinler her zaman düz metin olarak eklenir. */
+function h(tag, cls, kids, attrs) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  for (const k of [].concat(kids)) if (k != null && k !== false) el.append(k.nodeType ? k : String(k));
+  if (attrs) for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+function mulberry32(a) {                                // tohumlu rastgele: sahne her açılışta aynı dizilir
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function mkCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+/* 3B simplex gürültüsü (x, y, zaman) → yaklaşık [-1, 1] */
+const Noise = (() => {
+  const p = new Uint8Array(512), rnd = mulberry32(20261006), perm = [...Array(256).keys()];
+  for (let i = 255; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [perm[i], perm[j]] = [perm[j], perm[i]]; }
+  for (let i = 0; i < 512; i++) p[i] = perm[i & 255];
+  const G = [1,1,0, -1,1,0, 1,-1,0, -1,-1,0, 1,0,1, -1,0,1, 1,0,-1, -1,0,-1, 0,1,1, 0,-1,1, 0,1,-1, 0,-1,-1];
+  const corner = (g, x, y, z) => {
+    let t = .6 - x * x - y * y - z * z;
+    if (t <= 0) return 0;
+    t *= t; g *= 3;
+    return t * t * (G[g] * x + G[g + 1] * y + G[g + 2] * z);
+  };
+  return (x, y, z) => {
+    const s = (x + y + z) / 3, i = Math.floor(x + s), j = Math.floor(y + s), k = Math.floor(z + s), t = (i + j + k) / 6;
+    const x0 = x - i + t, y0 = y - j + t, z0 = z - k + t;
+    let i1, j1, k1, i2, j2, k2;
+    if (x0 >= y0) {
+      if (y0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+      else if (x0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1; }
+      else { i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1; }
+    } else {
+      if (y0 < z0) { i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1; }
+      else if (x0 < z0) { i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1; }
+      else { i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+    }
+    const ii = i & 255, jj = j & 255, kk = k & 255;
+    return 32 * (
+      corner(p[ii + p[jj + p[kk]]] % 12, x0, y0, z0) +
+      corner(p[ii + i1 + p[jj + j1 + p[kk + k1]]] % 12, x0 - i1 + 1 / 6, y0 - j1 + 1 / 6, z0 - k1 + 1 / 6) +
+      corner(p[ii + i2 + p[jj + j2 + p[kk + k2]]] % 12, x0 - i2 + 1 / 3, y0 - j2 + 1 / 3, z0 - k2 + 1 / 3) +
+      corner(p[ii + 1 + p[jj + 1 + p[kk + 1]]] % 12, x0 - .5, y0 - .5, z0 - .5));
+  };
+})();
+
+const params = new URLSearchParams(location.search);
+const PRESENTER = params.has('presenter');              // sunucu görünümü: aynı dosya, sahne çalışmaz
+
+const stage = $('#stage'), hole = $('#hole'), glCanvas = $('#gl'), glowCanvas = $('#glow'), fxCanvas = $('#fx');
+const slidesW = $('#slidesW'), slidesB = $('#slidesB');
+const ringBtn = $('#ring'), soundBtn = $('#sound');
+const HOLE_CLOSED = 'circle(0px at 50% 50%)';
+const A = 'A', B = 'B';                                 // A = siyah zemin ("dark"), B = beyaz zemin ("light")
+
+let stageScale = 1;
+function fitStage() {
+  stageScale = Math.min(innerWidth / W, innerHeight / H);
+  stage.style.transform = `translate(-50%, -50%) scale(${stageScale})`;
+  Ring.resize();
+  if (RS.mode === 'closing') Closing.frame();           // boyut değişince WebGL tuvali boşalır
+  else if (RS.mode === 'show') Ring.update();
+}
+
+// world: şu an görünen zemin; target: geçiş bitince görünecek olan; tl: süren zemin geçişi
+const S = { world: A, target: A, busy: false, tl: null, pending: [], overview: false };
+const STATS = { fps: 0, ms: 0, trail: 1, leaves: 0 };   // konsoldan: sunum.stats
+
+/* =====================================================================
+   5) UZAK DOĞU DOKUSU — washi kâğıdı, mürekkep dumanı, ensō
+   ===================================================================== */
+/* Beyaz dünya: pirinç kâğıdı. Sıcak beyaz zemin + hafif lekelenme + prosedürel lifler; mat, sabit. */
+function makeWashi(cv) {
+  const g = cv.getContext('2d'), rnd = mulberry32(77);
+  g.fillStyle = CONFIG.colors.paper; g.fillRect(0, 0, W, H);
+  const lw = 240, lh = 135, m = mkCanvas(lw, lh), mg = m.getContext('2d'), id = mg.createImageData(lw, lh);
+  for (let y = 0, i = 0; y < lh; y++) for (let x = 0; x < lw; x++, i += 4) {
+    const n = Noise(x * .03, y * .03, 5) * .65 + Noise(x * .09, y * .09, 9) * .35;
+    id.data[i] = 150; id.data[i + 1] = 128; id.data[i + 2] = 96; id.data[i + 3] = Math.max(0, n) * 26;
+  }
+  mg.putImageData(id, 0, 0);
+  g.drawImage(m, 0, 0, W, H);
+  g.lineCap = 'round';
+  for (let i = 0; i < 2600; i++) {                      // lifler: yarısı açık, yarısı koyu; kısa ve hafif kıvrık
+    const x = rnd() * W, y = rnd() * H, a = rnd() * TAU, len = 18 + rnd() * rnd() * 150, bend = (rnd() - .5) * .9;
+    g.strokeStyle = rnd() < .5 ? 'rgba(255,255,255,.55)' : `rgba(118,102,78,${.05 + rnd() * .07})`;
+    g.lineWidth = .4 + rnd() * .9;
+    g.beginPath(); g.moveTo(x, y);
+    g.quadraticCurveTo(x + Math.cos(a + bend) * len * .5, y + Math.sin(a + bend) * len * .5, x + Math.cos(a) * len, y + Math.sin(a) * len);
+    g.stroke();
+  }
+  g.fillStyle = 'rgba(110,94,70,.13)';
+  for (let i = 0; i < 700; i++) g.fillRect(rnd() * W, rnd() * H, .6 + rnd() * 1.2, .6 + rnd() * 1.2);
+}
+/* Siyah dünya: döşenebilir (kenarları birleşen) gürültü dokusu; CSS ile çok yavaş kaydırılır, kare başına maliyeti yok */
+function makeSmoke() {
+  const n = 512, v = new Float32Array(n * n), rnd = mulberry32(31);
+  for (const [cells, wgt] of [[3, .5], [6, .27], [12, .15], [24, .08]]) {
+    const grid = Float32Array.from({ length: cells * cells }, () => rnd());
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const fx = x / n * cells, fy = y / n * cells, ix = fx | 0, iy = fy | 0;
+      const tx = smooth(0, 1, fx - ix), ty = smooth(0, 1, fy - iy), jx = (ix + 1) % cells, jy = (iy + 1) % cells;
+      const a = grid[iy * cells + ix], b = grid[iy * cells + jx], c = grid[jy * cells + ix], d = grid[jy * cells + jx];
+      v[y * n + x] += wgt * (a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty);
+    }
+  }
+  const c = mkCanvas(n, n), g = c.getContext('2d'), id = g.createImageData(n, n);
+  for (let i = 0; i < n * n; i++) {
+    id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = 255;
+    id.data[i * 4 + 3] = 255 * smooth(.42, .78, v[i]);
+  }
+  g.putImageData(id, 0, 0);
+  const url = `url(${c.toDataURL()})`;
+  document.querySelectorAll('.smoke').forEach(el => { el.style.backgroundImage = url; });
+}
+/* Ensō: fırçayla çizilmiş gibi açık uçlu çember. Kalınlık değişken (dolgun başlar, kuruyarak incelir);
+   maske üzerindeki çizgi dashoffset ile ilerletilerek "fırça hızıyla" çizilir. */
+const Enso = {
+  masks: [], uid: 0,
+  markup(N, seed, offset) {
+    const cx = 20, cy = 20, a0 = -1.15, sweep = 5.7, out = [], inn = [], mid = [], hair = [], id = 'ensoMask' + (++this.uid);
+    for (let i = 0; i <= N; i++) {
+      const u = i / N, a = a0 + sweep * u, r = 13.2 + .55 * Math.sin(u * 6.3 + seed * 2);
+      const hw = (.38 + 2.5 * Math.pow(1 - u, 1.35)) * Math.min(1, .45 + u / .06), c = Math.cos(a), s = Math.sin(a);
+      out.push(`${(cx + c * (r + hw)).toFixed(2)} ${(cy + s * (r + hw)).toFixed(2)}`);
+      inn.unshift(`${(cx + c * (r - hw)).toFixed(2)} ${(cy + s * (r - hw)).toFixed(2)}`);
+      mid.push(`${(cx + c * r).toFixed(2)} ${(cy + s * r).toFixed(2)}`);
+      if (u > .42 && u < .93) hair.push(`${(cx + c * (r + hw + 1.1)).toFixed(2)} ${(cy + s * (r + hw + 1.1)).toFixed(2)}`);
+    }
+    return `<mask id="${id}" maskUnits="userSpaceOnUse" x="-4" y="-4" width="48" height="48">` +
+      `<path d="M${mid.join('L')}" pathLength="1" fill="none" stroke="#fff" stroke-width="11" stroke-dasharray="1 1" stroke-dashoffset="${offset}"/></mask>` +
+      `<g mask="url(#${id})"><path d="M${out.join('L')}L${inn.join('L')}Z" fill="currentColor"/>` +
+      `<path d="M${hair.join('L')}" fill="none" stroke="currentColor" stroke-width=".45"/></g>`;
+  },
+  // Üst/alt satırdaki küçük ensōlar: her sayfa değişiminde yeniden çizilir
+  init() {
+    document.querySelectorAll('.bar .enso').forEach((el, i) => { el.innerHTML = this.markup(56, i, 1); this.masks.push(el.querySelector('mask path')); });
+  },
+  draw() {
+    gsap.fromTo(this.masks, { attr: { 'stroke-dashoffset': 1 } },
+      { attr: { 'stroke-dashoffset': 0 }, duration: .9, ease: 'power3.out', stagger: .14, overwrite: true });
+  }
+};
+
+/* Fırça rakamlar: her rakam bir ya da iki fırça darbesinin orta çizgisiyle tanımlıdır (100x140 kutu).
+   Orta çizgi örneklenir, ensōdaki gibi değişken kalınlıklı bir dış hat üretilir; her darbenin kendi
+   maskesi vardır, böylece rakam darbe darbe "yazılır". Kenar pürüzü: #rough filtresi. */
+const DIGITS = {
+  0: ['M52 14C24 14 16 50 16 74C16 104 30 128 52 128C76 128 86 100 86 70C86 42 76 14 50 14'],
+  1: ['M28 40C40 34 50 26 57 12L55 128'],
+  2: ['M20 42C22 22 38 12 54 12C72 12 84 24 84 40C84 62 50 86 18 124C40 120 64 122 90 126'],
+  3: ['M20 26C32 14 48 12 58 12C74 12 84 22 84 36C84 54 66 64 46 66C68 66 88 76 88 96C88 116 70 128 52 128C36 128 22 122 14 108'],
+  4: ['M64 12L14 94L92 92', 'M66 44L64 130'],
+  5: ['M32 14L24 64C34 56 46 52 56 52C76 52 88 68 88 88C88 112 70 128 50 128C34 128 22 120 14 108', 'M30 16L82 13'],
+  6: ['M76 16C48 22 20 52 18 90C18 114 32 128 52 128C72 128 86 114 86 94C86 74 72 62 54 62C38 62 24 72 18 90'],
+  7: ['M16 18L86 15C66 48 48 84 42 130'],
+  8: ['M52 66C32 60 24 48 24 38C24 22 36 12 52 12C68 12 80 22 80 38C80 50 70 60 52 66C30 72 18 86 18 100C18 116 32 128 52 128C72 128 86 116 86 100C86 86 74 72 52 66'],
+  9: ['M84 50C80 68 66 78 50 78C32 78 18 64 18 46C18 26 32 12 50 12C70 12 84 26 84 50C84 90 68 118 30 128']
+};
+const SVGNS = 'http://www.w3.org/2000/svg';
+const Brush = {
+  uid: 0, cache: {},
+  geometry(d, wid, seed) {
+    const probe = $('#probe');
+    probe.setAttribute('d', d);
+    const len = probe.getTotalLength(), n = Math.max(10, Math.ceil(len / 2.4)), P = [], out = [], inn = [], mid = [], hair = [];
+    for (let i = 0; i <= n; i++) { const q = probe.getPointAtLength(len * i / n); P.push(q.x, q.y); }
+    for (let i = 0; i <= n; i++) {
+      const a = Math.max(0, i - 3), b = Math.min(n, i + 3), u = i / n, x = P[i * 2], y = P[i * 2 + 1];
+      let tx = P[b * 2] - P[a * 2], ty = P[b * 2 + 1] - P[a * 2 + 1];
+      const l = Math.hypot(tx, ty) || 1;
+      tx /= l; ty /= l;
+      // dolgun başlar, kuruyarak incelir; hafif titreme
+      const hw = wid * (.44 + .76 * Math.pow(1 - u, 1.25)) * Math.min(1, .4 + u / .05) * (1 + .09 * Math.sin(u * 15 + seed));
+      out.push(`${(x - ty * hw).toFixed(1)} ${(y + tx * hw).toFixed(1)}`);
+      inn.unshift(`${(x + ty * hw).toFixed(1)} ${(y - tx * hw).toFixed(1)}`);
+      mid.push(`${x.toFixed(1)} ${y.toFixed(1)}`);
+      if (u > .4 && u < .94) hair.push(`${(x - ty * (hw + wid * .32)).toFixed(1)} ${(y + tx * (hw + wid * .32)).toFixed(1)}`);
+    }
+    return { out: `M${out.join('L')}L${inn.join('L')}Z`, mid: 'M' + mid.join('L'), hair: hair.length > 1 ? 'M' + hair.join('L') : '' };
+  },
+  stroke(d, wid, seed) {
+    const c = this.cache[d] || (this.cache[d] = this.geometry(d, wid, seed)), id = 'brushMask' + (++this.uid);
+    return `<mask id="${id}" maskUnits="userSpaceOnUse" x="-40" y="-40" width="220" height="240">` +
+      `<path d="${c.mid}" pathLength="1" fill="none" stroke="#fff" stroke-width="${(wid * 3.6).toFixed(1)}" stroke-dasharray="1 1" stroke-dashoffset="0"/></mask>` +
+      `<g mask="url(#${id})"><path d="${c.out}" fill="currentColor"/><path d="${c.hair}" fill="none" stroke="currentColor" stroke-width="${(wid * .12).toFixed(2)}"/></g>`;
+  },
+  number(value, cls) {
+    const str = String(value), adv = 94, svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${adv * (str.length - 1) + 100} 140`);
+    svg.setAttribute('class', 'brush ' + (cls || ''));
+    svg.innerHTML = '<g filter="url(#rough)">' + [...str].map((ch, i) =>
+      `<g transform="translate(${i * adv} 0)">${(DIGITS[ch] || []).map((d, k) => this.stroke(d, 7.5, i * 3 + k)).join('')}</g>`).join('') + '</g>';
+    return svg;
+  },
+  /* Sumi ensō: tek bir fırça darbesi, onlarca "kıl"dan oluşur. Her kıl kendi mürekkebini taşır:
+     başta hepsi dolu olduğundan darbe dolgundur; ilerledikçe kıllar öbek öbek kurur, darbe incelir,
+     kenarları kırılır ve ucu açık kalır. Maske, darbeyi fırça hızıyla açar. */
+  sumi(cls) {
+    const svg = document.createElementNS(SVGNS, 'svg'), id = 'ensoMask' + (++Enso.uid), rnd = mulberry32(11);
+    const N = 170, M = 40, cx = 20, cy = 20, a0 = -1.3, sweep = 5.72, mid = [];
+    const rad = u => 13.3 + .55 * Math.sin(u * 5.1 + 1), half = u => (.42 + 2.75 * Math.pow(1 - u, 1.15)) * Math.min(1, .2 + u / .03);
+    let out = '';
+    for (let i = 0; i <= N; i++) {
+      const u = i / N, a = a0 + sweep * u;
+      mid.push(`${(cx + Math.cos(a) * rad(u)).toFixed(2)} ${(cy + Math.sin(a) * rad(u)).toFixed(2)}`);
+    }
+    for (let j = 0; j < M; j++) {
+      const o = (j + .5) / M * 2 - 1, start = .34 + .4 * rnd() - .2 * Math.abs(o);     // kenar kılları daha erken kurur
+      let d = '', pen = false;
+      for (let i = 0; i <= N; i++) {
+        const u = i / N, a = a0 + sweep * u, dry = smooth(start, 1.3, u);
+        // mürekkep: kıllar arasında yavaş değişen gürültü → komşu kıllar birlikte kurur (şerit şerit boşluk)
+        const ink = .5 + .5 * (.75 * Noise(u * 7, o * 2.6, 3) + .25 * Noise(u * 26, o * 9, 5));
+        if (ink > dry * .98 - .02) {
+          const r = rad(u) + o * half(u) + .07 * Noise(u * 16, j * .8, 7);
+          d += (pen ? 'L' : 'M') + (cx + Math.cos(a) * r).toFixed(2) + ' ' + (cy + Math.sin(a) * r).toFixed(2);
+          pen = true;
+        } else pen = false;
+      }
+      if (d) out += `<path d="${d}" stroke-width="${(.2 + .16 * rnd()).toFixed(2)}" opacity="${(.5 + .5 * rnd()).toFixed(2)}"/>`;
+    }
+    for (let k = 0; k < 9; k++) {                        // fırçanın kâğıda ilk değdiği yerde sıçrayan damlalar
+      const a = a0 - .12 + rnd() * .4, r = rad(0) + (rnd() - .5) * 8.5;
+      out += `<circle cx="${(cx + Math.cos(a) * r).toFixed(2)}" cy="${(cy + Math.sin(a) * r).toFixed(2)}" r="${(.05 + .16 * rnd() * rnd()).toFixed(2)}" fill="currentColor" stroke="none"/>`;
+    }
+    svg.setAttribute('viewBox', '0 0 40 40');
+    svg.setAttribute('class', 'brush ' + (cls || ''));
+    svg.innerHTML = `<mask id="${id}" maskUnits="userSpaceOnUse" x="-4" y="-4" width="48" height="48">` +
+      `<path d="M${mid.join('L')}" pathLength="1" fill="none" stroke="#fff" stroke-width="13" stroke-dasharray="1 1" stroke-dashoffset="0"/></mask>` +
+      `<g mask="url(#${id})" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${out}</g>`;
+    return svg;
+  },
+  // Darbeler sırayla, fırça hızıyla çizilir
+  draw(svg, dur = .6, delay = 0, ease = 'power2.out') {
+    return gsap.fromTo(svg.querySelectorAll('mask path'), { attr: { 'stroke-dashoffset': 1 } },
+      { attr: { 'stroke-dashoffset': 0 }, duration: dur, stagger: dur * .7, ease, delay });
+  }
+};
+
+/* =====================================================================
+   6) GÖRSELLER — dosyayı yükle, beyaz pikselleri şeffaf yap (eşik), beyaz ve siyah
+      kopyalarını üret; silüetlerde rüzgâr altı kenar noktalarını çıkar.
+      Sıra: dosya → (piksel okunamıyorsa ya da dosya yoksa) gömülü kopya → yedek çizim.
+      Not: sayfa file:// ile açıldığında tarayıcı diskteki görselin piksellerini
+      okutmaz; bu durumda embedded.js'teki kopya kullanılır
+      (yeni görsel ekleyince: python tools/embed_silhouettes.py).
+   ===================================================================== */
+const SPRITES = {};
+const FILES = window.SILHOUETTE_FILES || {}, EMBEDDED = window.SILHOUETTE_DATA || {};
+
+function processSource(src, sw, sh, wantEdges) {
+  const cfg = CONFIG.sprite, k = Math.min(1, cfg.maxH / sh);
+  const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k));
+  const c = mkCanvas(w, h), g = c.getContext('2d', { willReadFrequently: true });
+  g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+  g.drawImage(src, 0, 0, w, h);
+  const p = g.getImageData(0, 0, w, h).data;           // file:// altında SecurityError fırlatır
+  const A = new Uint8ClampedArray(w * h), lo = cfg.lumaLo, hi = cfg.lumaHi;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0, i = 0; y < h; y++) for (let x = 0; x < w; x++, i++) {
+    const l = .299 * p[i * 4] + .587 * p[i * 4 + 1] + .114 * p[i * 4 + 2];
+    const a = l <= lo ? 255 : l >= hi ? 0 : 255 * (hi - l) / (hi - lo);
+    A[i] = a;
+    if (a > 127) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) throw new Error('boş görsel');
+  const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+  const paint = v => {                                  // sınır kutusuna kırpılmış, tek renkli kopya
+    const o = mkCanvas(bw, bh), og = o.getContext('2d'), id = og.createImageData(bw, bh), q = id.data;
+    for (let y = 0, j = 0; y < bh; y++) for (let x = 0; x < bw; x++, j += 4) {
+      q[j] = q[j + 1] = q[j + 2] = v; q[j + 3] = A[(y + y0) * w + x + x0];
+    }
+    og.putImageData(id, 0, 0);
+    return o;
+  };
+  const sp = { white: paint(255), black: paint(0), w: bw, h: bh, aspect: bw / bh, edgesR: [], edgesL: [], rootY: .5 };
+  // Dalın kökü: sol kenardaki dolu piksellerin ortalama yüksekliği
+  let ry = 0, rn = 0;
+  for (let y = y0; y <= y1; y++) if (A[y * w + x0 + 2] > 127) { ry += y - y0; rn++; }
+  if (rn) sp.rootY = ry / rn / bh;
+  if (wantEdges) {
+    // Rüzgâr altı kenarlar: sağında (yeterince geniş) boşluk olan figür kenarları. Kol-gövde arası gibi
+    // dar aralıklar sayılmaz; böylece izler yalnızca figürün açık havaya bakan kenarından doğar.
+    // edgesL, figür yatay çevrildiğinde kullanılır.
+    const minGap = .07 * bh;
+    for (let y = y0; y <= y1; y += 2) {
+      let prevEnd = -1e9, x = x0;
+      while (x <= x1) {
+        if (A[y * w + x] <= 127) { x++; continue; }
+        let e = x;
+        while (e < x1 && A[y * w + e + 1] > 127) e++;
+        let nx = e + 1;
+        while (nx <= x1 && A[y * w + nx] <= 127) nx++;
+        if (nx > x1 || nx - e - 1 >= minGap) sp.edgesR.push((e - x0 + 1) / bw, (y - y0) / bh);
+        if (x - prevEnd - 1 >= minGap) sp.edgesL.push(1 - (x - x0) / bw, (y - y0) / bh);
+        prevEnd = e; x = e + 1;
+      }
+    }
+  }
+  return sp;
+}
+
+function loadImage(url) {
+  return new Promise((ok, fail) => { const im = new Image(); im.onload = () => ok(im); im.onerror = fail; im.src = url; });
+}
+/* names: aynı görsel için kabul edilen dosya adları (ilk bulunan kullanılır) */
+async function loadSprite(names, dir, fallback, wantEdges) {
+  names = [].concat(names);
+  for (const n of names) {
+    const urls = FILES[n] ? [FILES[n]] : CONFIG.sprite.ext.map(e => `${dir}${n}.${e}`);
+    for (const u of [...urls, EMBEDDED[n]]) {
+      if (!u) continue;
+      try { const im = await loadImage(u); return processSource(im, im.naturalWidth, im.naturalHeight, wantEdges); }
+      catch (e) { /* dosya yok ya da pikseli okunamıyor: sıradakini dene */ }
+    }
+  }
+  console.warn(`Görsel yüklenemedi, yedek çizim kullanılıyor: ${names[0]}`);
+  const fb = fallback(names[0]);
+  return processSource(fb, fb.width, fb.height, wantEdges);
+}
+
+/* --- Yedek çizimler (dosya yoksa) --- */
+function blank(w, h) { const c = mkCanvas(w, h), g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.fillStyle = g.strokeStyle = '#000'; return [c, g]; }
+function fallbackFigure(name) {
+  const [c, g] = blank(900, 600);
+  const person = (cx, hgt) => {
+    const b = 580, u = hgt / 100;
+    g.beginPath(); g.arc(cx, b - 90 * u, 9 * u, 0, TAU); g.fill();
+    g.beginPath(); g.roundRect(cx - 13 * u, b - 79 * u, 26 * u, 40 * u, 9 * u); g.fill();
+    g.fillRect(cx - 11 * u, b - 44 * u, 9.5 * u, 44 * u);
+    g.fillRect(cx + 1.5 * u, b - 44 * u, 9.5 * u, 44 * u);
+  };
+  if (/crowd|kalabal/i.test(name)) [70, 190, 310, 430, 550, 670, 790].forEach((x, i) => person(x, 380 + (i * 37 % 60)));
+  else if (/hands|pair|iki/i.test(name)) { person(330, 540); person(570, 520); g.fillRect(340, 300, 220, 22); }
+  else person(450, 540);
+  return c;
+}
+/* SVG yol tanımlarıyla basit yaprak şekilleri */
+const LEAF_PATHS = {
+  maple: 'M100 196 L98 132 L52 164 L72 122 L8 128 L62 96 L22 44 L80 78 L100 6 L120 78 L178 44 L138 96 L192 128 L128 122 L148 164 L102 132 Z',
+  gingko: 'M100 196 C98 160 96 140 92 122 C60 112 26 100 14 70 C30 44 62 26 96 22 L100 62 L104 22 C138 26 170 44 186 70 C174 100 140 112 108 122 C104 140 103 160 104 196 Z',
+  bamboo: 'M92 8 C120 60 132 120 112 176 L118 196 L108 178 C80 130 78 70 92 8 Z'
+};
+function fallbackLeaf(name) {
+  const [c, g] = blank(200, 200);
+  g.fill(new Path2D(LEAF_PATHS[/maple|momiji/.test(name) ? 'maple' : /gin/.test(name) ? 'gingko' : 'bamboo']));
+  return c;
+}
+function fallbackBranch() {                             // kökü solda, sağa-aşağı uzanan çam dalı
+  const [c, g] = blank(760, 420), rnd = mulberry32(5);
+  g.lineCap = 'round';
+  const bough = t => [760 * t, 60 + 250 * t * t - 40 * Math.sin(t * 3)];
+  for (let i = 0; i < 40; i++) {
+    const [x, y] = bough(i / 40), [x2, y2] = bough((i + 1) / 40);
+    g.lineWidth = 16 - 13 * i / 40; g.beginPath(); g.moveTo(x, y); g.lineTo(x2, y2); g.stroke();
+  }
+  const tuft = (x, y, dir) => {
+    g.lineWidth = 1.3;
+    for (let i = 0; i < 22; i++) {
+      const a = dir + (rnd() - .5) * 2.4, l = 34 + rnd() * 26;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+    }
+  };
+  for (let i = 2; i <= 10; i++) {
+    const [x, y] = bough(i / 10), dir = (i % 2 ? -1 : 1) * (.9 + rnd() * .5) + .3, l = 50 + rnd() * 50;
+    const tx = x + Math.cos(dir) * l, ty = y + Math.sin(dir) * l;
+    g.lineWidth = 3.2; g.beginPath(); g.moveTo(x, y); g.lineTo(tx, ty); g.stroke();
+    tuft(tx, ty, dir); tuft((x + tx) / 2, (y + ty) / 2, dir - .4);
+  }
+  return c;
+}
+
+const LEAF_SPRITES = [];    // { white: [keskin, hafif bulanık, bulanık], black: [...], fw, fh }
+let BRANCH_SPRITE = null;
+/* Tüm sayfaların silüetleri baştan yüklenir: sayfa geçişinde bekleme olmaz */
+/* Instagram ekran görüntüleri: CONFIG.instagram.shots, uzantılar sırayla denenerek aranır.
+   İlk görsel yoksa konsola yazılır ve sayfa ensō yedeğini gösterir. */
+const IG = { shots: [] };                               // [{ src, w, h }]
+async function findImage(base) {
+  const urls = /\.\w{3,4}$/.test(base) ? [base] : CONFIG.instagram.ext.map(e => `${base}.${e}`);
+  for (const u of urls) { try { const im = await loadImage(encodeURI(u)); return { src: u, w: im.naturalWidth, h: im.naturalHeight }; } catch (e) { /* sıradaki uzantı */ } }
+  return null;
+}
+async function loadInstagram() {
+  const c = CONFIG.instagram, dir = 'assets/instagram/';
+  const found = await Promise.all(c.shots.map(n => findImage(n.includes('/') ? n : dir + n)));
+  if (!found[0]) console.warn(`Instagram ekran görüntüsü bulunamadı: ${dir}${c.shots[0]} — denenen uzantılar: ${c.ext.join(', ')}`);
+  IG.shots = found[0] ? found.filter(Boolean) : [];
+}
+
+async function loadAssets(scene) {
+  const figs = new Set();
+  for (const s of SLIDES) {
+    (s.silhouettes || []).forEach(o => figs.add(o.src));
+    (s.crowds || []).forEach(c => c.sprites.forEach(n => figs.add(n)));
+  }
+  const jobs = [...figs].map(async n => { SPRITES[n] = await loadSprite(n, 'assets/silhouettes/', fallbackFigure, true); });
+  if (scene) CONFIG.leaves.names.forEach((names, i) => jobs.push((async () => {
+    const sp = await loadSprite(names, 'assets/nature/', fallbackLeaf, false);
+    // Yapraklar küçük çizildiği için küçültülmüş kopyalar; derinlik için önceden bulanıklaştırılmış sürümler
+    const k = 96 / Math.max(sp.w, sp.h), w = Math.ceil(sp.w * k) + 12, h = Math.ceil(sp.h * k) + 12;
+    const variants = src => [0, 1.3, 2.8].map(b => {
+      const c = mkCanvas(w, h), g = c.getContext('2d');
+      if (b && 'filter' in g) g.filter = `blur(${b}px)`;
+      g.drawImage(src, 6, 6, w - 12, h - 12);
+      return c;
+    });
+    const m = Math.max(w, h);
+    LEAF_SPRITES[i] = { white: variants(sp.white), black: variants(sp.black), fw: w / m, fh: h / m };
+  })()));
+  if (scene) jobs.push((async () => { BRANCH_SPRITE = await loadSprite(CONFIG.branch.names, 'assets/nature/', fallbackBranch, false); })());
+  if (scene) jobs.push((async () => { BONSAI_SPRITE = await loadSprite(CONFIG.bonsai.names, 'assets/nature/', fallbackBonsai, false); })());
+  if (SLIDES.some(s => s.type === 'instagram')) jobs.push(loadInstagram());
+  await Promise.all(jobs);
+}
+
+/* =====================================================================
+   7) SAHNE KURULUMU — sayfa verisinden figür listesi
+      silhouettes : tek tek yerleştirilen silüetler { src, x (merkez), y (ayak hizası), scale | h, flip, layer }
+      crowds      : ufuk çizgisi boyunca otomatik dizilen sıra
+      horizons    : ince zemin çizgisi
+      layer "white" → beyaz katman (siyah zemin), "black" → siyah katman (beyaz zemin)
+   ===================================================================== */
+function makeFigure(o) {
+  const sp = SPRITES[o.src], h = Math.round(o.h || (o.scale || .4) * H);
+  // mode: 'in' rüzgârın içinden geliyor | 'on' yerinde | 'out' rüzgârla dağılıyor;  p: 0 dağınık … 1 bütün
+  return { sp, x: o.x, y: Math.round(o.y), h, w: h * sp.aspect, flip: !!o.flip, ph: rand(TAU), amp: 0, seed: rand(100), mode: 'on', p: 1 };
+}
+function crowdFigures(cr) {
+  const rnd = mulberry32(cr.seed || 1), row = [];
+  let x = cr.from;
+  for (let i = 0; i < 200; i++) {
+    const src = cr.sprites[(rnd() * cr.sprites.length) | 0];
+    const h = cr.h[0] + rnd() * (cr.h[1] - cr.h[0]), w = h * SPRITES[src].aspect;
+    if (x + w > cr.to) break;
+    row.push({ src, x: x + w / 2, y: cr.y, h });
+    x += w + cr.gap[0] + rnd() * (cr.gap[1] - cr.gap[0]);
+  }
+  const last = row[row.length - 1];
+  const shift = last ? (cr.to - (last.x + last.h * SPRITES[last.src].aspect / 2)) / 2 : 0;   // sırayı ortala
+  return row.map(o => { o.x += shift; return makeFigure(o); });
+}
+function sceneFor(s, key) {
+  const def = s.world === 'light' ? 'black' : 'white', mine = o => (o.layer || def) === key;
+  const figs = (s.silhouettes || []).filter(o => mine(o) && SPRITES[o.src]).map(makeFigure);
+  (s.crowds || []).filter(mine).forEach(cr => figs.push(...crowdFigures(cr)));
+  return { figs, lines: (s.horizons || []).filter(mine) };
+}
+
+/* =====================================================================
+   8) RÜZGÂR ALANI — tüm hareketin tek kaynağı.
+      akış = soldan sağa ana yön × şiddet  +  curl gürültüsü (zamanla değişen girdaplar)
+      şiddet = sakin taban + yavaş soluk + esinti zarfı (4–8 sn'de bir, soldan sağa süpüren cephe)
+   ===================================================================== */
+const Wind = {
+  t: 0, gusts: [], next: 1.2,
+  update(dt) {
+    const c = CONFIG.wind;
+    this.t += dt;
+    if (this.t >= this.next) {
+      this.gusts.push({ t0: this.t, dur: rand(...c.gustDur), amp: rand(...c.gustAmp) });
+      this.next = this.t + rand(...c.gustEvery);
+    }
+    while (this.gusts.length && this.t - this.gusts[0].t0 > this.gusts[0].dur + 3) this.gusts.shift();
+  },
+  gust(x) {                                             // 0…1: o noktadaki anlık esinti
+    let v = 0;
+    for (const q of this.gusts) {
+      const u = (this.t - q.t0 - (x + 300) / CONFIG.wind.front) / q.dur;
+      if (u > 0 && u < 1) { const s = Math.sin(Math.PI * u); v = Math.max(v, q.amp * s * s); }
+    }
+    return v;
+  },
+  strength(x) {
+    const c = CONFIG.wind;
+    return c.calm + c.breath * (.5 + .5 * Noise(this.t * .11, 3.7, x * .0004)) + c.gust * this.gust(x);
+  },
+  sample(x, y, out) {                                   // out = hız (px/sn); dönen değer = şiddet
+    const c = CONFIG.wind, s = this.strength(x), e = .04;
+    const nx = x * c.curlScale, ny = y * c.curlScale * 1.35, nz = this.t * c.curlRate, n0 = Noise(nx, ny, nz);
+    const k = c.curl * (.55 + .6 * s);
+    out.x = c.speed * s + (Noise(nx, ny + e, nz) - n0) / e * k;
+    out.y = -(Noise(nx + e, ny, nz) - n0) / e * k;
+    return s;
+  }
+};
+const V = { x: 0, y: 0 };
+
+/* =====================================================================
+   9) FIRÇA İZLERİ — her iz, rüzgâr alanında taşınan bir parçacığın geçmiş
+      noktalarından oluşan şerittir (ribbon). Kalınlık ve opaklık uçlarda sıfıra iner.
+   ===================================================================== */
+const RN = 64, STEP = .05;                              // şerit başına en çok nokta; nokta ekleme aralığı (sn)
+const UX = new Float32Array(RN), UY = new Float32Array(RN), HW = new Float32Array(RN);
+function newRibbon() {
+  return { xs: new Float32Array(RN), ys: new Float32Array(RN), n: 0, max: 40, acc: 0, age: 0, life: 1,
+           wid: 1, alpha: 1, k: 1, dead: true, wait: rand(0, 3) };
+}
+function startRibbon(r, x, y) {
+  r.xs[0] = r.xs[1] = x; r.ys[0] = r.ys[1] = y;
+  r.n = 2; r.acc = 0; r.age = 0; r.dead = false;
+}
+function stepRibbon(r, dt) {
+  r.age += dt;
+  if (r.age >= r.life) { r.dead = true; return; }
+  const h = r.n - 1;
+  let x = r.xs[h], y = r.ys[h];
+  Wind.sample(x, y, V);
+  x += V.x * r.k * dt; y += V.y * r.k * dt;
+  r.acc += dt;
+  if (r.acc >= STEP) {
+    r.acc -= STEP;
+    if (r.n < r.max) r.n++;
+    else { r.xs.copyWithin(0, 1, r.n); r.ys.copyWithin(0, 1, r.n); }   // en eski nokta düşer: iz kaynağından kopar
+  }
+  r.xs[r.n - 1] = x; r.ys[r.n - 1] = y;
+}
+function drawRibbon(ctx, r, rgb) {
+  const n = r.n, m = n - 1;
+  if (r.dead || n < 4) return;
+  const k = r.age / r.life, a = r.alpha * smooth(0, .2, k) * (1 - smooth(.5, 1, k));   // yavaşça belirir, uzaklaşınca söner
+  if (a < .01) return;
+  const xs = r.xs, ys = r.ys;
+  if (Math.abs(xs[m] - xs[0]) + Math.abs(ys[m] - ys[0]) < 3) return;
+  for (let i = 0; i <= m; i++) {
+    const p = i ? i - 1 : 0, q = i < m ? i + 1 : m;
+    const tx = xs[q] - xs[p], ty = ys[q] - ys[p], l = Math.hypot(tx, ty) || 1, u = i / m;
+    UX[i] = -ty / l; UY[i] = tx / l;
+    HW[i] = r.wid * Math.pow(Math.sin(Math.PI * Math.pow(u, 1.2)), .85);   // ince başlar, ortada dolgun, sivrilerek biter
+  }
+  const grd = ctx.createLinearGradient(xs[0], ys[0], xs[m], ys[m]);
+  grd.addColorStop(0, `rgba(${rgb},${(a * .08).toFixed(3)})`);
+  grd.addColorStop(.45, `rgba(${rgb},${a.toFixed(3)})`);
+  grd.addColorStop(1, `rgba(${rgb},${(a * .75).toFixed(3)})`);
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.moveTo(xs[0], ys[0]);
+  for (let i = 1; i < m; i++) ctx.lineTo(xs[i] + UX[i] * HW[i], ys[i] + UY[i] * HW[i]);
+  ctx.lineTo(xs[m], ys[m]);
+  for (let i = m - 1; i >= 1; i--) ctx.lineTo(xs[i] - UX[i] * HW[i], ys[i] - UY[i] * HW[i]);
+  ctx.closePath();
+  ctx.fill();
+  if (r.wid >= 1.4) {                                   // kuru fırça: gövdenin iki yanında ayrışan ince kıllar
+    ctx.strokeStyle = `rgba(${rgb},${(a * .5).toFixed(3)})`;
+    ctx.lineWidth = .55;
+    for (let side = -1; side <= 1; side += 2) {
+      const i0 = Math.round(m * (side < 0 ? .14 : .38)), i1 = Math.round(m * (side < 0 ? .66 : .93));
+      ctx.beginPath();
+      for (let i = i0; i <= i1; i++) {
+        const o = side * (HW[i] + 1.1), px = xs[i] + UX[i] * o, py = ys[i] + UY[i] * o;
+        i === i0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+  }
+}
+/* Serbest izler: iki katmanda da aynı konumda (A'da beyaz, B'de siyah) */
+const FREE = [];
+function spawnFree(r) {
+  startRibbon(r, rand(-250, W * .85), rand(110, 1000));
+  r.max = (rand(32, RN)) | 0; r.life = rand(5, 9); r.wid = rand(.8, 2.7); r.alpha = rand(.35, .8); r.k = rand(.8, 1.3);
+}
+/* Figür izleri: silüetin rüzgâr altındaki kenar noktalarından, seyrek olarak doğar */
+function edgeStart(r, f) {
+  const E = f.flip ? f.sp.edgesL : f.sp.edgesR;
+  if (!E.length) return false;
+  const i = ((Math.random() * E.length / 2) | 0) * 2;
+  startRibbon(r, f.x - f.w / 2 + E[i] * f.w - 2, f.y - f.h + E[i + 1] * f.h);
+  return true;
+}
+function spawnFigTrail(L, r) {
+  let pick = Math.random() * L.total, f = L.live[0];
+  for (const g of L.live) { pick -= g.h; if (pick <= 0) { f = g; break; } }     // büyük figürden daha çok iz
+  if (f.p < .7) { r.wait = .4; return; }                 // figür henüz toplanmadı
+  if (!edgeStart(r, f)) { r.wait = 5; return; }
+  r.max = clamp(Math.round(f.h / 9), 12, 46);
+  r.wid = clamp(f.h * rand(.006, .011), .9, 4.2);
+  r.life = rand(...CONFIG.wind.trailLife);
+  r.alpha = rand(.55, .95);
+  r.k = rand(.55, .95);
+}
+/* Sayfadan çıkan silüet: kenarlarından bir anda çok sayıda iz kopar, figür izlere dönüşür */
+function burst(L, f) {
+  const n = clamp(Math.round(f.h / 34), 3, 14);
+  for (let k = 0; k < n && L.burst.length < 56; k++) {
+    const r = newRibbon();
+    if (!edgeStart(r, f)) return;
+    r.max = clamp(Math.round(f.h / 7), 14, 56);
+    r.wid = clamp(f.h * rand(.006, .013), .9, 4.6);
+    r.life = rand(1.6, 3.2);
+    r.alpha = rand(.6, 1);
+    r.k = rand(.9, 1.7);
+    L.burst.push(r);
+  }
+}
+
+/* =====================================================================
+   10) YAPRAKLAR — rüzgârla taşınır; hafif yerçekimi + hava direnci.
+       phi: yaprağın kendi ekseni etrafındaki taklası (scaleY = cos phi → kenar üstünde ince çizgi).
+       Takla döndükçe yanal kuvvetin yönü değişir → salınarak düşme.
+   ===================================================================== */
+const LEAVES = [];
+function resetLeaf(l, first) {
+  const c = CONFIG.leaves;
+  l.x = first ? rand(-40, W) : -40 - rand(260);         // ekrandan çıkan yaprak soldan yeniden girer
+  l.y = rand(-140, H * .72);
+  l.vx = CONFIG.wind.speed * .4; l.vy = 0;
+  l.phi = rand(TAU); l.wphi = rand(1.3, 3) * (Math.random() < .5 ? -1 : 1);
+  l.th = rand(TAU); l.wth = rand(-.7, .7);
+  l.kind = (Math.random() * LEAF_SPRITES.length) | 0;
+  l.size = c.size[0] + (c.size[1] - c.size[0]) * Math.pow(l.z, 1.4);
+}
+function initLeaves() {
+  const n = CONFIG.leaves.count;
+  for (let i = 0; i < n; i++) {
+    const z = (i + .5) / n, l = { z, blur: z < .3 ? 2 : z < .55 ? 1 : 0, alpha: .55 + .45 * z };   // z: 0 uzak … 1 yakın
+    resetLeaf(l, true);
+    LEAVES.push(l);                                     // uzaktan yakına sıralı
+  }
+}
+function stepLeaf(l, dt) {
+  const c = CONFIG.leaves, d = .45 + .55 * l.z;         // uzaktakiler daha yavaş
+  Wind.sample(l.x, l.y, V);
+  const rx = V.x * d - l.vx, ry = V.y * d - l.vy, rel = Math.hypot(rx, ry) + .001;   // yaprağa göre hava hızı
+  const face = Math.abs(Math.cos(l.phi));               // 1: yüzü dönük (çok direnç), 0: kenar üstü
+  const kd = c.drag * (.55 + .9 * face), sw = c.sway * Math.sin(2 * l.phi) * d / rel;
+  l.vx += (kd * rx - ry * sw) * dt;
+  l.vy += (kd * ry + rx * sw + c.gravity * d * (1.25 - .5 * face)) * dt;
+  l.x += l.vx * dt; l.y += l.vy * dt;
+  l.phi += l.wphi * (.6 + rel * .012) * dt;             // esintide daha hızlı takla
+  l.th += (l.wth + .8 * Math.sin(l.phi)) * (.6 + rel * .008) * dt;
+  if (l.x > W + 90 || l.y > H + 90 || l.x < -400) resetLeaf(l, false);
+}
+function drawLeaf(ctx, l, key, safe) {
+  const sp = LEAF_SPRITES[l.kind], img = sp[key][l.blur], w = l.size * sp.fw, h = l.size * sp.fh;
+  let sy = Math.cos(l.phi);
+  if (Math.abs(sy) < .05) sy = sy < 0 ? -.05 : .05;
+  const c = Math.cos(l.th), s = Math.sin(l.th);
+  ctx.globalAlpha = l.alpha * safeFade(l.x, l.y, safe);
+  ctx.setTransform(c, s, -s * sy, c * sy, l.x, l.y);
+  ctx.drawImage(img, -w / 2, -h / 2, w, h);
+}
+
+/* =====================================================================
+   11) DAL — köşeden girer; kökü sabit, rüzgârla eğilir ve yaylanarak geri gelir
+   ===================================================================== */
+const Branch = { th: 0, w: 0 };
+function stepBranch(dt) {
+  const b = CONFIG.branch, x = b.corner === 'right' ? W - 200 : 200, s = Wind.strength(x);
+  const target = b.bend * (s - CONFIG.wind.calm) + b.flutter * s * Noise(Wind.t * 1.4, 9.3, 0);
+  for (let left = dt; left > 0; left -= .016) {          // yay-sönüm: küçük adımlarla, kare hızından bağımsız
+    const h = Math.min(left, .016);
+    Branch.w += (b.stiff * (target - Branch.th) - b.damp * Branch.w) * h;
+    Branch.th += Branch.w * h;
+  }
+}
+/* Dal dikey dilimlere bölünür; her dilim bir öncekine göre biraz daha döner (kökten uca artan eğilme). */
+function drawBranch(ctx, key) {
+  const b = CONFIG.branch, sp = BRANCH_SPRITE, img = sp[key];
+  const w = b.width, h = w / sp.aspect, n = b.slices, sw = w / n, ssw = img.width / n, py = h * sp.rootY;
+  ctx.save();
+  ctx.translate(b.corner === 'right' ? W + b.overhang : -b.overhang, b.y + py);
+  if (b.corner === 'right') ctx.scale(-1, 1);            // görselde kök solda; sağ köşe için yatay çevrilir
+  for (let i = 0; i < n; i++) {
+    ctx.rotate(Branch.th / n);
+    ctx.drawImage(img, i * ssw, 0, ssw, img.height, 0, -py, sw + 1.5, h);
+    ctx.translate(sw, 0);
+  }
+  ctx.restore();
+}
+
+/* Bonsai: nature:"bonsai" olan sayfalarda çam dalının yerini alır; sağ altta durur, saksısı sabit,
+   gövdesi yukarı doğru artan çok hafif bir salınımla rüzgâra eşlik eder. */
+let BONSAI_SPRITE = null;
+function fallbackBonsai() {                             // dosya yoksa: sade bir bonsai
+  const [c, g] = blank(600, 640);
+  g.lineCap = 'round';
+  g.beginPath(); g.moveTo(170, 548); g.lineTo(430, 548); g.lineTo(404, 616); g.lineTo(196, 616); g.closePath(); g.fill();
+  g.fillRect(154, 530, 292, 24);
+  const trunk = t => [300 - 62 * Math.sin(t * 5.2) * (1 - t * .3), 534 - 330 * t];
+  for (let i = 0; i <= 60; i++) { const [x, y] = trunk(i / 60); g.beginPath(); g.arc(x, y, 27 - 19 * i / 60, 0, TAU); g.fill(); }
+  const pad = (x, y, w) => {                            // yaprak kümesi: altı düz, üstü kabarık bulut
+    for (let i = 0; i < 7; i++) { g.beginPath(); g.ellipse(x + (i - 3) * w * .14, y - (i % 2) * w * .1, w * .22, w * .15, 0, 0, TAU); g.fill(); }
+    g.fillRect(x - w * .5, y, w, w * .07);
+  };
+  for (const [t, dx, w] of [[.42, -150, 200], [.58, 150, 210], [.78, -110, 190], [1, 20, 260]]) {
+    const [x, y] = trunk(t);
+    g.lineWidth = 11; g.beginPath(); g.moveTo(x, y); g.lineTo(x + dx, y - 22); g.stroke();
+    pad(x + dx, y - 34, w);
+  }
+  return c;
+}
+function drawBonsai(ctx, key) {
+  const b = CONFIG.bonsai, sp = BONSAI_SPRITE, img = sp[key], w = b.h * sp.aspect, n = b.slices, sh = b.h / n, ih = img.height / n;
+  const s = Wind.strength(b.x), lean = b.h * b.sway * ((s - CONFIG.wind.calm) + .25 * s * Noise(Wind.t * .9, 4.1, 0));
+  for (let i = 0; i < n; i++) {                         // yatay dilimler: yukarı çıktıkça daha çok kayar
+    const t = 1 - (i + .5) / n, off = lean * Math.pow(Math.max(0, t - .18) / .82, 1.7);
+    ctx.drawImage(img, 0, i * ih, img.width, ih, b.x - w / 2 + off, b.y - b.h + i * sh, w, sh + .6);
+  }
+}
+
+/* =====================================================================
+   12) KATMANLAR — her katman tek tuvalde, kendi renginde çizilir. Sıra:
+       serbest izler → (reversed A'da) gizli ipucu kesimi → figür izleri → uzak yapraklar → dal
+       → silüetler → yakın yapraklar.  İzler her zaman silüetlerin ARKASINDA kalır.
+       Tuvaller ve izler kalıcıdır; sayfa değişince yalnızca figür listesi yenilenir (setScene).
+   ===================================================================== */
+function makeLayer(canvas, key) {
+  return {
+    ctx: canvas.getContext('2d'), key, w: key === 'white' ? A : B, rgb: key === 'white' ? '255,255,255' : '0,0,0', color: CONFIG.colors[key],
+    figs: [], live: [], total: 0, lines: [], nTrails: 0,     // figs: çizilenler (çıkanlar dahil); live: bu sayfanınkiler
+    trails: Array.from({ length: CONFIG.wind.figTrails[1] }, newRibbon), burst: [], other: null, cut: false,
+    safe: [], mask: null,                                   // metin güvenli alanı: dikdörtgenler + silme maskesi (bkz. updateSafe)
+    bonsai: false, ba: 0                                    // bu katmanda bonsai mi var; ba: 0 dal … 1 bonsai (yumuşak geçiş)
+  };
+}
+/* Yeni sayfanın sahnesi: görünen katmandaki eski silüetler rüzgârla dağılır, yenileri rüzgârın
+   içinden süzülerek gelir. Görünmeyen katmanda değişim anında olur. */
+function setScene(s, target, first) {
+  const c = CONFIG.wind;
+  for (const L of [layerW, layerB]) {
+    const visNow = !first && L.w === S.world, visAfter = L.w === target, sc = sceneFor(s, L.key);
+    if (visNow) {
+      for (const f of L.figs) if (f.mode !== 'out') { f.mode = 'out'; f.p = clamp(f.p, 0, 1); burst(L, f); }
+      L.lines.forEach(l => { l.goal = 0; });
+    } else { L.figs.length = 0; L.lines.length = 0; }
+    for (const f of sc.figs) {
+      // geçiş bitince görünecekse süzülerek gelir; kaybolmakta olan zeminde ise ancak zemin kapandıktan sonra belirir
+      if (visAfter) { f.mode = 'in'; f.p = -rand(.15, .55); }
+      else if (visNow) { f.mode = 'in'; f.p = -1.6; }
+      L.figs.push(f);
+    }
+    for (const l of sc.lines) L.lines.push({ y: l.y, from: l.from, to: l.to, a: visAfter || visNow ? (visAfter ? 0 : -3) : 1, goal: 1 });
+    L.live = sc.figs;
+    L.total = sc.figs.reduce((sum, f) => sum + f.h, 0);
+    L.nTrails = sc.figs.length ? clamp(Math.round(L.total * c.figTrailDensity), c.figTrails[0], c.figTrails[1]) : 0;
+    L.bonsai = s.nature === 'bonsai' && (s.type !== 'reversed' || L.w === B);
+    if (!visNow) L.ba = L.bonsai ? 1 : 0;
+  }
+  layerW.cut = s.type === 'reversed';
+}
+/* Silüet yatay şeritler halinde çizilir; her şeridin rüzgâr altı (sağ) kenarı birkaç piksel
+   ileri geri oynar, rüzgâr üstü kenar sabit kalır — kumaş rüzgârda oynuyormuş gibi.
+   Gelirken/giderken (p < 1) şeritler rüzgâr yönünde, her biri farklı mesafede kayar ve uzar:
+   figür yatay fırça izlerine ayrışır. */
+function drawFigure(ctx, f, img) {
+  const e = f.mode === 'on' ? 0 : 1 - smooth(0, 1, f.p);
+  if (e > .995) return;
+  const dx = f.x - f.w / 2, dy = f.y - f.h, sy = img.height / f.h, kk = 9 / f.h, strip = CONFIG.wind.strip, a0 = ctx.globalAlpha;
+  const reach = (f.mode === 'out' ? 1 : -1) * (f.flip ? -1 : 1) * e * e * (440 + .55 * f.h);
+  if (e) ctx.globalAlpha = a0 * Math.pow(1 - e, 1.2);
+  if (f.flip) { ctx.save(); ctx.translate(2 * f.x, 0); ctx.scale(-1, 1); }
+  for (let y = 0; y < f.h; y += strip) {
+    const hh = Math.min(strip, f.h - y);
+    const d = f.amp * (Math.sin(y * kk - f.ph) + .5 * Math.sin(y * kk * 2.7 - f.ph * 1.6));
+    let off = 0, st = 0;
+    if (e) {
+      const hs = Math.abs(Math.sin(y * 12.9898 + f.seed) * 43758.5453) % 1;
+      off = reach * (.25 + .75 * (.5 + .5 * Noise(y * .03, f.seed, 0))) * (.9 + .1 * hs);
+      st = Math.abs(off) * .5;
+    }
+    if (f.flip) ctx.drawImage(img, 0, y * sy, img.width, hh * sy, dx - d + off, dy + y, f.w + d + st, hh);
+    else ctx.drawImage(img, 0, y * sy, img.width, hh * sy, dx + off, dy + y, f.w + d + st, hh);
+  }
+  if (f.flip) ctx.restore();
+  ctx.globalAlpha = a0;
+}
+function stepLayer(L, dt) {
+  const c = CONFIG.wind, active = Math.round(L.nTrails * Q.trail);
+  for (let i = L.figs.length - 1; i >= 0; i--) {
+    const f = L.figs[i], s = Wind.strength(f.x);
+    if (f.mode === 'in') { f.p += dt / 1.5; if (f.p >= 1) { f.p = 1; f.mode = 'on'; } }
+    else if (f.mode === 'out') { f.p -= dt / 1.15; if (f.p <= 0) { L.figs.splice(i, 1); continue; } }
+    f.ph += dt * (.8 + 3.2 * s);                        // kenar dalgalanması esintiyle güçlenir ve hızlanır
+    f.amp = clamp(f.h * c.ripple, .5, 3.2) * (.25 + .75 * s);
+  }
+  L.ba = clamp(L.ba + (L.bonsai ? 1.3 : -1.3) * dt, 0, 1);
+  for (let i = L.lines.length - 1; i >= 0; i--) {
+    const l = L.lines[i];
+    l.a += (l.goal ? 1.4 : -2.2) * dt;
+    if (l.goal) l.a = Math.min(l.a, 1); else if (l.a <= 0) L.lines.splice(i, 1);
+  }
+  for (let i = 0; i < L.trails.length; i++) {
+    const r = L.trails[i];
+    if (!r.dead) stepRibbon(r, dt);
+    else if (i < active) {
+      r.wait -= dt * (.5 + 2 * Wind.gust(W / 2));        // esinti geldiğinde daha çok iz doğar
+      if (r.wait <= 0) { r.wait = rand(.6, 4.5); spawnFigTrail(L, r); }
+    }
+  }
+  for (let i = L.burst.length - 1; i >= 0; i--) {
+    stepRibbon(L.burst[i], dt);
+    if (L.burst[i].dead) L.burst.splice(i, 1);
+  }
+}
+function drawLayer(L) {
+  const ctx = L.ctx, key = L.key, nFree = Math.round(FREE.length * Q.trail);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, W, H);
+
+  for (let i = 0; i < nFree; i++) drawRibbon(ctx, FREE[i], L.rgb);
+  if (L.cut) {
+    // Gizli ipucu (yalnızca reversed A): serbest beyaz izler, görünmeyen siyah silüetlerin arkasından geçerken kesilir
+    ctx.globalCompositeOperation = 'destination-out';
+    for (const f of L.other.figs) drawFigure(ctx, f, f.sp.black);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  for (const r of L.trails) drawRibbon(ctx, r, L.rgb);
+  for (const r of L.burst) drawRibbon(ctx, r, L.rgb);
+  if (L.mask && L.safe.length) {                         // izler metin alanlarında silinir (yumuşak kenarlı maske)
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.drawImage(L.mask, 0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  let i = 0;
+  for (; i < Q.leaves && LEAVES[i].z < .6; i++) drawLeaf(ctx, LEAVES[i], key, L.safe);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  if (L.ba < .99) { ctx.globalAlpha = 1 - L.ba; drawBranch(ctx, key); }
+  if (L.ba > .01 && BONSAI_SPRITE) { ctx.globalAlpha = L.ba; drawBonsai(ctx, key); }
+  ctx.globalAlpha = 1;
+  for (const f of L.figs) drawFigure(ctx, f, f.sp[key]);
+  ctx.fillStyle = L.color;
+  for (const l of L.lines) if (l.a > 0) { ctx.globalAlpha = Math.min(1, l.a); ctx.fillRect(l.from, l.y, l.to - l.from, 1.5); }
+  for (; i < Q.leaves; i++) drawLeaf(ctx, LEAVES[i], key, L.safe);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+}
+
+/* Kalite: kare hızı düşerse önce iz sayısı, o da yetmezse yaprak sayısı otomatik azalır */
+const Q = { trail: 1, leaves: CONFIG.leaves.count, acc: 0, work: 0, n: 0, warm: 2 };
+function governor(rawDt, workMs) {
+  if (document.hidden || rawDt > .25) return;
+  Q.acc += rawDt; Q.work += workMs; Q.n++;
+  if (Q.n < 90) return;
+  const avg = Q.acc / Q.n, p = CONFIG.perf;
+  STATS.fps = 1 / avg; STATS.ms = Q.work / Q.n;
+  // Yalnızca çizim gerçekten pahalıysa azalt (50/30 Hz ekranlarda düşük kare hızı yanıltmasın)
+  if (Q.warm > 0) Q.warm--;
+  else if (avg > 1 / p.minFps && STATS.ms > 6) {
+    if (Q.trail > p.minTrail) Q.trail = Math.max(p.minTrail, Q.trail - .2);
+    else if (Q.leaves > p.minLeaves) Q.leaves -= 2;
+  }
+  STATS.trail = Q.trail; STATS.leaves = Q.leaves;
+  Q.acc = Q.work = Q.n = 0;
+}
+
+let layerW = null, layerB = null, last = 0;
+function loop(now) {
+  const raw = (now - last) / 1000, dt = Math.min(raw, .05);   // tüm hareket delta-time ile
+  last = now;
+  const t0 = performance.now();
+  Wind.update(dt);
+  const nFree = Math.round(FREE.length * Q.trail);
+  for (let i = 0; i < nFree; i++) { const r = FREE[i]; if (r.dead) spawnFree(r); else stepRibbon(r, dt); }
+  for (let i = 0; i < Q.leaves; i++) stepLeaf(LEAVES[i], dt);
+  stepBranch(dt);
+  stepLayer(layerW, dt);
+  stepLayer(layerB, dt);
+  // İki katman da hep canlıdır; tamamen örtülü olan (o an hiçbir pikseli görünmeyen) tuval boşuna boyanmaz
+  if (S.busy || S.world === 'A') drawLayer(layerW);
+  if (S.busy || S.world === 'B') drawLayer(layerB);
+  governor(raw, performance.now() - t0);
+  requestAnimationFrame(loop);
+}
+
+/* =====================================================================
+   13) ALTIN YÜZÜK — Three.js. Yüzüğün deliği = diğer dünyanın zemini.
+       Her karede yüzüğün orta çemberi kameradan project() ile ekrana düşürülür ve
+       #hole bu çokgene kırpılır. (ellipse() yerine polygon(): eğim ve perspektifle
+       iz düşüm eksenlere hizalı bir elips olmaktan çıkar; çokgen her açıda tam oturur.
+       Kırpma sınırı tüpün orta çizgisinde kaldığından tüp onu her zaman örter.)
+       Işıltı: ikinci bir tuvalde UnrealBloomPass; "screen" karışımıyla yalnızca ışığı eklenir.
+   ===================================================================== */
+// GSAP bu değerleri sürer. cy: merkezin yukarı kayması (birim); mode: 'world' zemini kırpar, 'closing' yalnızca deliği hesaplar
+const RS = { s: 0, th: CONFIG.ring.theta[0], tilt: CONFIG.ring.tilt[0], cy: 0, invert: false, mode: 'world' };
+const Ring = {
+  three: null, bloom: null, fb: null,
+  pts: new Float32Array(CONFIG.ring.segments * 2), n: 0,   // deliğin ekrandaki çokgeni (px)
+  initThree(THREE, RoomEnvironment) {
+    const r = CONFIG.ring;
+    const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, alpha: true, antialias: true });
+    renderer.setClearColor(0x000000, 0);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    const scene = new THREE.Scene();
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), .03).texture;   // ayna yansıması için ortam
+    pmrem.dispose();
+    const camera = new THREE.PerspectiveCamera(r.fov, W / H, .1, 100);
+    camera.position.z = r.dist;
+    camera.updateMatrixWorld();                          // project() ilk render'dan önce de doğru çalışsın
+    const mesh = new THREE.Mesh(
+      new THREE.TorusGeometry(r.radius, r.tube, 72, 240),                              // sade yüzey: desen yok
+      new THREE.MeshStandardMaterial({ color: CONFIG.colors.gold, metalness: r.metalness, roughness: r.roughness })
+    );
+    const group = new THREE.Group();
+    group.add(mesh);
+    scene.add(group);
+    this.three = { THREE, renderer, scene, camera, mesh, group, v: new THREE.Vector3() };
+    this.resize();
+  },
+  initBloom(EffectComposer, RenderPass, UnrealBloomPass, OutputPass, RoomEnvironment) {
+    const { THREE, camera, mesh } = this.three, b = CONFIG.ring.bloom;
+    const renderer = new THREE.WebGLRenderer({ canvas: glowCanvas, antialias: false });
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), .03).texture;
+    pmrem.dispose();
+    const m2 = new THREE.Mesh(mesh.geometry, mesh.material.clone()), group = new THREE.Group();
+    group.add(m2);
+    scene.add(group);
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(W / 2, H / 2), b.strength, b.radius, b.threshold));
+    composer.addPass(new OutputPass());
+    this.bloom = { renderer, composer, mesh: m2, group };
+    this.resize();
+  },
+  resize() {
+    const k = stageScale * Math.min(devicePixelRatio || 1, 2);
+    if (this.three) this.three.renderer.setSize(Math.round(W * k), Math.round(H * k), false);
+    if (this.bloom) {                                    // ışıltı yarı çözünürlükte yeter
+      const w = Math.round(W * k / 2), h = Math.round(H * k / 2);
+      this.bloom.renderer.setSize(w, h, false);
+      this.bloom.composer.setSize(w, h);
+    }
+  },
+  // Three.js yüklenemezse: aynı matematikle 2B tuvale çizilen sade altın halka
+  fallback() {
+    if (!this.fb) {
+      const c = mkCanvas(W, H);
+      glCanvas.after(c);
+      this.fb = c.getContext('2d');
+    }
+    return this.fb;
+  },
+  update() {
+    const r = CONFIG.ring, n = r.segments, T = Ring.three, BL = Ring.bloom, P = Ring.pts, world = RS.mode === 'world';
+    if (RS.s < .0005) {                                  // yüzük henüz tohumun içinde
+      if (world) hole.style.clipPath = RS.invert ? 'none' : HOLE_CLOSED;
+      Ring.clear();
+      Ring.n = 0;
+      return;
+    }
+    let poly = '', first = '';
+    const add = (px, py, i) => {
+      P[i * 2] = px; P[i * 2 + 1] = py;
+      if (!world) return;
+      const s = px.toFixed(2) + 'px ' + py.toFixed(2) + 'px';
+      if (!i) first = s;
+      poly += (i ? ',' : '') + s;
+    };
+    if (T) {
+      if (Ring.fb) Ring.fb.clearRect(0, 0, W, H);
+      T.mesh.rotation.y = RS.th;
+      T.group.rotation.set(RS.tilt, 0, r.roll);
+      T.group.position.y = RS.cy;
+      T.group.scale.setScalar(RS.s);
+      T.group.updateMatrixWorld(true);
+      for (let i = 0; i < n; i++) {
+        const a = i / n * TAU;
+        T.v.set(Math.cos(a) * r.radius, Math.sin(a) * r.radius, 0).applyMatrix4(T.mesh.matrixWorld).project(T.camera);
+        add((T.v.x + 1) * W / 2, (1 - T.v.y) * H / 2, i);
+      }
+      T.renderer.render(T.scene, T.camera);
+      if (BL) {
+        BL.mesh.rotation.y = RS.th;
+        BL.group.rotation.copy(T.group.rotation);
+        BL.group.position.copy(T.group.position);
+        BL.group.scale.copy(T.group.scale);
+        BL.composer.render();
+        glowCanvas.style.visibility = 'visible';
+      }
+    } else {
+      const g = Ring.fallback(), U = H / 2 / Math.tan(r.fov * Math.PI / 360) / r.dist;
+      const ct = Math.cos(RS.th), st = Math.sin(RS.th), cx = Math.cos(RS.tilt), sx = Math.sin(RS.tilt);
+      const cz = Math.cos(r.roll), sz = Math.sin(r.roll);
+      g.clearRect(0, 0, W, H);
+      g.beginPath();
+      for (let i = 0; i < n; i++) {
+        const a = i / n * TAU, c = Math.cos(a) * RS.s, s = Math.sin(a) * RS.s;
+        const x1 = c * ct, z1 = -c * st;                             // Y dönüşü
+        const x2 = x1 * cz - s * sz, y2 = x1 * sz + s * cz;          // yuvarlanma
+        const y3 = y2 * cx - z1 * sx, z3 = y2 * sx + z1 * cx;        // eğim
+        const f = r.dist / (r.dist - z3) * U, px = W / 2 + x2 * f, py = H / 2 - (y3 + RS.cy) * f;
+        add(px, py, i);
+        i ? g.lineTo(px, py) : g.moveTo(px, py);
+      }
+      g.closePath();
+      const grd = g.createLinearGradient(0, 0, W, H);
+      grd.addColorStop(0, CONFIG.colors.goldHi); grd.addColorStop(.5, CONFIG.colors.gold); grd.addColorStop(1, CONFIG.colors.goldHi);
+      g.strokeStyle = grd;
+      g.lineWidth = Math.max(2, 2 * r.tube * RS.s * U);
+      g.stroke();
+    }
+    Ring.n = n;
+    if (!world) return;                                  // kapanış: delik #fx tuvalinde kullanılır, zemine dokunulmaz
+    // invert: beyaz zemin deliğin DIŞINDA kalır (B → A: delikten siyah dünya görünür)
+    hole.style.clipPath = RS.invert
+      ? `polygon(evenodd, 0px 0px, ${W}px 0px, ${W}px ${H}px, 0px ${H}px, 0px 0px, ${poly}, ${first}, 0px 0px)`
+      : `polygon(${poly})`;
+  },
+  clear() {
+    if (this.three) this.three.renderer.clear();
+    if (this.fb) this.fb.clearRect(0, 0, W, H);
+    glowCanvas.style.visibility = 'hidden';
+  }
+};
+/* Three.js ve eklentileri yerelden, tek klasik script olarak gelir (assets/vendor/three-kit.js → window.THREE_KIT;
+   bkz. tools/build_vendor.py). Yüklenemezse yüzük 2B olarak çizilir. */
+if (!PRESENTER) {
+  try {
+    const K = window.THREE_KIT;
+    if (!K) throw new Error('assets/vendor/three-kit.js yüklenmedi');
+    Ring.initThree(K.THREE, K.RoomEnvironment);
+    try { Ring.initBloom(K.EffectComposer, K.RenderPass, K.UnrealBloomPass, K.OutputPass, K.RoomEnvironment); }
+    catch (e) { console.warn('Bloom kurulamadı; yüzük ışıltısız çizilecek.', e); }
+  } catch (e) { console.warn('Three.js yüklenemedi; yüzük 2B olarak çizilecek.', e); }
+}
+
+/* =====================================================================
+   14) SES — Web Audio ile sentezlenir, ses dosyası yok
+   ===================================================================== */
+const Sound = {
+  ctx: null, noise: null, on: true,
+  init() {
+    try { this.on = localStorage.getItem('ikiliSahne.ses') !== '0'; } catch (e) {}
+    soundBtn.classList.toggle('muted', !this.on);
+  },
+  toggle() {
+    this.on = !this.on;
+    try { localStorage.setItem('ikiliSahne.ses', this.on ? '1' : '0'); } catch (e) {}
+    soundBtn.classList.toggle('muted', !this.on);
+    stage.querySelectorAll('video').forEach(v => { v.muted = !this.on; });
+    if (this.on) this.ensure();
+  },
+  // Tarayıcılar sesi yalnızca kullanıcı etkileşiminden sonra başlatır
+  ensure() {
+    if (!this.on) return null;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!this.ctx) {
+      this.ctx = new AC();
+      const len = this.ctx.sampleRate * 2;
+      this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const d = this.noise.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    return this.ctx;
+  },
+  osc(type, f0, f1, t, dur, gain, dest) {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.value = gain;
+    o.connect(g).connect(dest);
+    o.start(t); o.stop(t + dur + 1.6);
+  },
+  whoosh(f0, f1, t, dur, gain, dest) {
+    const c = this.ctx, src = c.createBufferSource(), flt = c.createBiquadFilter(), g = c.createGain();
+    src.buffer = this.noise; src.loop = true;
+    flt.type = 'lowpass'; flt.Q.value = .4;
+    flt.frequency.setValueAtTime(f0, t);
+    flt.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.value = gain;
+    src.connect(flt).connect(g).connect(dest);
+    src.start(t); src.stop(t + dur + 1.6);
+  },
+  // Derin, yumuşak ton: yüzük büyürken yavaşça yükselir (toB) ya da alçalır (toA)
+  ring(dur, rising) {
+    const c = this.ensure(); if (!c) return;
+    const t = c.currentTime + .02, out = c.createGain(), lp = c.createBiquadFilter();
+    out.gain.setValueAtTime(.0001, t);
+    out.gain.exponentialRampToValueAtTime(.55, t + dur * .45);
+    out.gain.exponentialRampToValueAtTime(.0001, t + dur + 1.4);
+    out.connect(c.destination);
+    lp.type = 'lowpass'; lp.frequency.value = 520; lp.connect(out);
+    const [a, b] = rising ? [49, 65.4] : [65.4, 49];
+    this.osc('sine', a, b, t, dur, .9, out);                       // gövde
+    this.osc('sine', a * 1.5, b * 1.5, t, dur, .28, out);          // beşli
+    this.osc('sine', a * 2.006, b * 2.006, t, dur, .16, out);      // hafif vuru yapan oktav
+    this.osc('triangle', a * 2, b * 2, t, dur, .12, lp);           // küçük hoparlörlerde duyulan harmonikler
+    this.whoosh(rising ? 160 : 520, rising ? 520 : 160, t, dur, .05, out);
+  }
+};
+
+/* =====================================================================
+   15) SAYFA TİPLERİ — her tip, sayfa verisinden DOM üretir (build). Üretilen DOM
+       "bitmiş" haldir: önizlemeler onu olduğu gibi kullanır; canlı sahnede giriş
+       hareketleri (enter) ve adımlar (data-step) bunun üstüne eklenir.
+         data-in        : sayfaya girerken rüzgâr yönünden süzülerek gelir ("slow": yavaş belirir)
+         data-step="n"  : n. "ileri"de açılır
+         data-out       : yalnızca çıkışta rüzgârla silinir (girişi tipe özeldir)
+         data-fit="px"  : metin bu genişliğe sığana kadar küçültülür (data-fith: yükseklik)
+   ===================================================================== */
+const IN = { 'data-in': '' }, SLOW = { 'data-in': 'slow' }, OUT = { 'data-out': '' };
+const isVideo = src => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(src);
+
+function statText(st) {
+  if (!st) return '';
+  const v = typeof st.value === 'number' ? st.value.toLocaleString('tr-TR') : st.value;
+  return [[v, st.unit].filter(Boolean).join(' '), st.label].filter(Boolean).join(' — ');
+}
+
+/* --- Medya: fotoğraf (gri ton + mürekkep maskesi) ya da video (dikeyse telefon çerçevesi) --- */
+const INK = [];
+function makeInkMasks() {
+  // Fotoğraf kenarı: mürekkebin kâğıda yayıldığı gibi organik ve düzensiz bir sınır (çizgi yok, iç kısım tam dolu).
+  // Şekil, köşeleri yumuşak bir dikdörtgendir; kenarı üç ölçekte gürültüyle girintili çıkıntılıdır.
+  for (let v = 0; v < 3; v++) {
+    const n = 640, c = mkCanvas(n, n), g = c.getContext('2d'), rnd = mulberry32(101 + v * 17), K = 420, e = 2 / 9;
+    g.fillStyle = '#000';
+    if ('filter' in g) g.filter = 'blur(1.4px)';
+    g.beginPath();
+    for (let i = 0; i < K; i++) {
+      const a = i / K * TAU, cs = Math.cos(a), sn = Math.sin(a);
+      const k = 1 + .028 * Noise(cs * 2.2 + v * 9, sn * 2.2, 1) + .016 * Noise(cs * 7, sn * 7, v * 5 + 2) + .007 * Noise(cs * 21, sn * 21, v * 3 + 4);
+      const x = n / 2 + Math.sign(cs) * Math.pow(Math.abs(cs), e) * n * .462 * k, y = n / 2 + Math.sign(sn) * Math.pow(Math.abs(sn), e) * n * .462 * k;
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.closePath();
+    g.fill();
+    for (let i = 0; i < 34; i++) {                       // kenarda biriken küçük mürekkep damlaları
+      const a = rnd() * TAU, cs = Math.cos(a), sn = Math.sin(a), k = .462 + (rnd() - .35) * .03;
+      g.beginPath();
+      g.arc(n / 2 + Math.sign(cs) * Math.pow(Math.abs(cs), e) * n * k, n / 2 + Math.sign(sn) * Math.pow(Math.abs(sn), e) * n * k, 2 + rnd() * rnd() * 9, 0, TAU);
+      g.fill();
+    }
+    INK.push(`url(${c.toDataURL()})`);
+  }
+}
+const PHONE_AR = .62;                                   // telefon çerçevesinin en geniş hali; daha geniş video içine sığdırılır
+function makeMedia(item, o) {
+  item = typeof item === 'string' ? { src: item } : item;
+  const video = isVideo(item.src), m = h('figure', 'm ' + (video ? 'video' : 'photo'));
+  const setAr = ar => { m.dataset.ar = ar; if (m.parentNode) fitMedia(m.parentNode); };
+  const missing = () => {                               // dosya yok: düzgün bir yedek kutu
+    m.classList.remove('photo');
+    m.replaceChildren(h('div', 'ph', [h('b', null, '?'), item.src]));
+  };
+  if (video) {
+    m.dataset.ar = item.portrait ? 9 / 16 : 16 / 9;
+    if (item.portrait) m.classList.add('phone');
+    if (o.thumb) m.append(h('div', 'ph', [h('b', null, '▶'), item.src.split('/').pop()]));
+    else {
+      const v = h('video', null, null, { src: encodeURI(item.src), playsinline: '', loop: '', preload: 'auto' });
+      v.muted = true;
+      v.addEventListener('loadedmetadata', () => {
+        if (!v.videoWidth) return;
+        const ar = v.videoWidth / v.videoHeight, tall = ar < 1;
+        m.classList.toggle('phone', tall);
+        setAr(tall ? Math.min(ar, PHONE_AR) : ar);
+      });
+      v.addEventListener('error', missing);
+      m.append(v);
+    }
+  } else {
+    m.dataset.ar = item.portrait ? 3 / 4 : 4 / 3;
+    const img = h('img', null, null, { src: encodeURI(item.src), alt: '', draggable: 'false' });
+    img.addEventListener('load', () => setAr(img.naturalWidth / img.naturalHeight));
+    img.addEventListener('error', missing);
+    const ink = h('div', 'ink', img);
+    ink.style.setProperty('--ink', INK[item.src.length % INK.length]);
+    m.append(ink);
+  }
+  if (item.caption) m.append(h('figcaption', null, item.caption));
+  return m;
+}
+/* rect = [sol, üst, genişlik, yükseklik]; öğeler oranları korunarak yan yana sığdırılır */
+function mediaBox(items, rect, o) {
+  const box = h('div', 'mbox', [].concat(items).map(it => makeMedia(it, o)), IN);
+  Object.assign(box.style, { left: rect[0] + 'px', top: rect[1] + 'px', width: rect[2] + 'px', height: rect[3] + 'px' });
+  box.dataset.w = rect[2]; box.dataset.h = rect[3];
+  fitMedia(box);
+  return box;
+}
+function fitMedia(box) {
+  const ms = [...box.children], gap = 44, sum = ms.reduce((a, m) => a + +m.dataset.ar, 0);
+  if (!sum) return;
+  const hh = Math.min(+box.dataset.h, (+box.dataset.w - gap * (ms.length - 1)) / sum);
+  ms.forEach(m => { m.style.height = hh + 'px'; m.style.width = hh * m.dataset.ar + 'px'; });
+}
+
+/* --- Daktilo: satır, yerleşim oynamadan harf harf yazılır --- */
+function typeLine(root, p, delay) {
+  const full = p.dataset.t, on = p.firstChild, off = p.lastChild, o = { n: 0 };
+  on.textContent = ''; off.textContent = full;
+  track(root, gsap.to(o, { n: full.length, duration: full.length * .04, ease: 'none', delay, onUpdate() {
+    const k = Math.round(o.n);
+    on.textContent = full.slice(0, k); off.textContent = full.slice(k);
+  } }));
+}
+
+/* --- QR (cdnjs: qrcode-generator). Her zaman beyaz üstüne siyah: ters renkli QR'ı çoğu kamera okumaz --- */
+function qrSvg(text) {
+  if (!window.qrcode) return '';
+  const q = qrcode(0, 'M'), m = 3;
+  q.addData(text); q.make();
+  const n = q.getModuleCount();
+  let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += `M${c + m} ${r + m}h1v1h-1z`;
+  return `<svg viewBox="0 0 ${n + 2 * m} ${n + 2 * m}" shape-rendering="crispEdges"><path d="${d}" fill="#000"/></svg>`;
+}
+
+const withCaption = (m, cap) => (m && cap ? Object.assign({}, typeof m === 'string' ? { src: m } : m, { caption: cap }) : m);
+/* Sol metin sütunu: içerik yüksekliği max'ı aşarsa küçültülür (data-fitv) */
+const leftCol = (kids, max) => h('div', 'lcol', h('div', 'in', kids, { 'data-fitv': max }));
+
+const TYPES = {
+  /* 1 — Kapak: büyük serif başlık; arkasında sumi fırçasıyla çizilen ensō */
+  cover: {
+    build(s) {
+      const enso = Brush.sumi('big-enso');
+      enso.setAttribute('data-out', '');
+      return h('div', 'slide t-cover', [enso, h('div', 'txt', [
+        s.kicker && h('div', 'kicker', s.kicker, IN), h('h1', null, s.title, IN), s.subtitle && h('p', 'sub', s.subtitle, IN)
+      ])]);
+    },
+    enter(el, s, o) { track(el, Brush.draw($('.big-enso', el), 2, o.delay, 'power2.inOut')); }
+  },
+
+  /* 2 — Bölüm: fırça rakam + bölüm adı + tek cümle */
+  section: {
+    build(s) {
+      const num = Brush.number(s.number, 'num');
+      num.setAttribute('data-out', '');
+      return h('div', 'slide t-section', [num, h('div', 'kicker', 'Bölüm', IN),
+        h('h1', null, s.name || s.title, { 'data-in': '', 'data-fit': '1100' }), s.intro && h('p', 'intro', s.intro, IN)]);
+    },
+    enter(el, s, o) { track(el, Brush.draw($('.num', el), .75, o.delay + .1)); }
+  },
+
+  /* 3 — Tek cümle / soru: kelimeler yavaşça belirir.
+         big: tek büyük sözcük · ring: ortada dönen altın yüzük (yalnızca gösterim) · lineDelay: sonraki satırlar gecikmeli */
+  statement: {
+    build(s) {
+      const lines = String(s.text || s.title || '').split('\n');
+      const long = Math.max(...lines.map(l => l.length)) > 34;      // uzun satır: punto küçülür
+      const q = h('h1', 'q' + (s.big ? ' big' : long ? ' long' : ''));
+      lines.forEach((line, i) => {
+        if (i) q.append(h('br'));
+        line.split(/\s+/).filter(Boolean).forEach((w, k) => {
+          if (k) q.append(' ');
+          q.append(h('span', null, w, s.lineDelay && i ? { 'data-out': '', 'data-line': i } : SLOW));
+        });
+      });
+      return h('div', 'slide t-statement' + (s.ring ? ' with-ring' : ''),
+        [s.kicker && h('div', 'kicker', s.kicker, IN), q, s.sub && h('p', 'sub dim', s.sub, SLOW)]);
+    },
+    enter(el, s, o) {
+      el.querySelectorAll('[data-line]').forEach(sp => track(el, gsap.fromTo(sp, { opacity: 0, x: -24 },
+        { opacity: 1, x: 0, duration: 1.9, ease: 'power2.out', delay: o.delay + s.lineDelay * sp.dataset.line })));
+      if (s.ring) RingShow.play(o.delay + .2);
+    }
+  },
+
+  /* 4 — Medya: solda başlık + satırlar, sağda fotoğraf ya da video; caption: medya altı mono açıklama */
+  media: {
+    steps: s => (s.stepwise === true ? (s.lines || []).length : 0),
+    build(s, w, o) {
+      const sw = s.stepwise === true;
+      return h('div', 'slide t-media', [
+        leftCol([s.kicker && h('div', 'kicker', s.kicker, IN), h('h1', null, s.heading || s.title, IN), s.sub && h('p', 'txt', s.sub, IN),
+          h('ul', 'lines', (s.lines || []).map((t, i) => h('li', null, t, sw ? { 'data-step': i + 1 } : IN)))], 770),
+        s.media && mediaBox(withCaption(s.media, s.caption), [860, 165, 930, 760], o)
+      ]);
+    }
+  },
+
+  /* 5 — Liste: maddeler tek tek gelir (stepwise:false → hepsi birden).
+         Madde "metin" ya da { title, detail }; columns:2 → iki kolon; chain:true → oklu zincir;
+         footer → son maddeden hemen sonra beliren mono satır */
+  list: {
+    steps: s => (s.stepwise === false ? 0 : (s.items || []).length),
+    build(s) {
+      const sw = s.stepwise !== false, items = s.items || [];
+      return h('div', 'slide t-list' + (s.chain ? ' chain' : '') + (s.columns === 2 ? ' cols' : ''), h('div', 'flow', [
+        h('h1', null, s.heading || s.title, { 'data-in': '', 'data-fit': '1300' }),
+        s.sub && h('p', 'sub', s.sub, IN),
+        h('ol', null, items.map((t, i) => {
+          t = typeof t === 'string' ? { title: t } : t;
+          return h('li', null, [h('span', 'n', s.chain ? (i ? '→' : '') : pad2(i + 1)),
+            h('span', null, [h('b', null, t.title), t.detail && h('em', 'dim', t.detail)])], sw ? { 'data-step': i + 1 } : IN);
+        })),
+        s.footer && h('div', 'foot kicker', s.footer, sw ? { 'data-step': items.length, 'data-delay': '.9' } : IN)
+      ], { 'data-fitv': '740' }));
+    }
+  },
+
+  /* 6 — Reversed: iki dünyanın metinleri aynı konumda, ayrı katmanlarda üst üste durur.
+         Adım 0 = A (siyah zemin), adım 1 = B (beyaz zemin); arada yüzük geçişi.
+         worldB.stepwise → B'nin maddeleri sonraki "ileri"lerle tek tek açılır (adım 2, 3…). */
+  reversed: {
+    steps: s => 1 + ((s.worldB || {}).stepwise ? (s.worldB.points || []).length : 0),
+    build(s, w, o) {
+      const isA = w === A, d = (isA ? s.worldA : s.worldB) || {}, sw = !isA && d.stepwise;
+      const col = h('div', 'col' + ((d.points || []).length > 4 ? ' many' : ''), [
+        h('div', 'label', d.label || (isA ? 'Kitle İletişimi' : 'Birebir İletişim'), IN),
+        h('h1', 'title', d.title, { 'data-in': '', 'data-fit': '820' }),
+        d.subtitle && h('p', 'sub', d.subtitle, IN),
+        h('ul', 'points', (d.points || []).map((p, i) => h('li', null, [h('span', 'n', pad2(i + 1)), h('span', null, p)], sw ? { 'data-step': i + 2 } : IN))),
+        d.stat && h('div', 'stat', statText(d.stat), IN),
+        d.quote && h('blockquote', 'quote', d.quote, SLOW),
+        d.dialog && h('div', 'dialog', d.dialog.map(t => h('p', 'type', [h('span', 'on', t), h('span', 'off')], { 'data-t': t, 'data-out': '' })))
+      ], { 'data-fitv': isA ? '725' : '830' });      // A'da alttaki kalabalığa, B'de alt satıra kadar
+      return h('div', 'slide t-reversed', [col, isA && d.media && mediaBox(d.media, [1010, 170, 780, 540], o)]);
+    },
+    enter(el) { el.querySelectorAll('.type').forEach(p => { p.firstChild.textContent = ''; p.lastChild.textContent = p.dataset.t; }); },
+    reveal(el) {                                        // bu dünya göründüğünde: diyalog daktilo gibi yazılır
+      let t = .5;
+      el.querySelectorAll('.type').forEach(p => { typeLine(el, p, t); t += p.dataset.t.length * .04 + .5; });
+    }
+  },
+
+  /* 7 — Tarif kartı: solda dikey başlık, adımlar fırça rakamlarla; her "ileri" bir adım */
+  recipe: {
+    steps: s => (s.stepwise === false ? 0 : (s.steps || []).length),
+    build(s) {
+      const sw = s.stepwise !== false;
+      return h('div', 'slide t-recipe', h('div', 'card', [
+        h('div', 'vt', h('h1', null, h('span', null, String(s.heading || s.title).replace(/\s*\n\s*/g, ' ')), { 'data-in': '', 'data-fith': '730' })),
+        h('div', 'body', [
+          s.meta && h('div', 'meta', s.meta.map(t => h('span', null, t)), IN),
+          h('ol', null, (s.steps || []).map((st, i) => {
+            st = typeof st === 'string' ? { title: st } : st;
+            return h('li', null, [Brush.number(i + 1), h('div', null, [h('b', null, st.title), st.detail && h('span', 'dim', st.detail)])],
+              sw ? { 'data-step': i + 1 } : IN);
+          }))
+        ])
+      ], SLOW));
+    }
+  },
+
+  /* 8 — Püf Noktası: siyah/beyaz hanko mührü + başlık + tanım (+ büyük alıntı) + 1-2 medya.
+         effect:"jumpcut" → başlık ve tanım sert kesmelerle, konum/ölçek atlayarak gelir */
+  tip: {
+    build(s, w, o) {
+      const a = s.effect === 'jumpcut' ? OUT : IN;
+      return h('div', 'slide t-tip' + (s.media ? '' : ' wide'), [
+        h('div', 'hanko', [h('b', null, 'PÜF'), h('i', null, 'NOKTASI')], OUT),
+        leftCol([h('h1', null, s.heading || s.title, a), s.text && h('p', 'txt', s.text, a), s.quote && h('blockquote', 'quote', s.quote, SLOW)], 525),
+        s.media && mediaBox(s.media, [860, 160, 930, 760], o)
+      ]);
+    },
+    enter(el, s, o) {
+      track(el, gsap.fromTo($('.hanko', el), { opacity: 0, scale: 1.9, rotation: -15 },       // mühür kâğıda basılır
+        { opacity: 1, scale: 1, rotation: -4, duration: .38, ease: 'power3.in', delay: o.delay + .55 }));
+      if (s.effect === 'jumpcut') {
+        const els = el.querySelectorAll('.lcol h1, .lcol .txt');
+        gsap.set(els, { opacity: 0 });
+        track(el, gsap.timeline({ delay: o.delay + .25 })
+          .set(els, { opacity: 1, x: -250, y: 46, scale: 1.45 }, 0)
+          .set(els, { x: 220, y: -34, scale: .8 }, .22)
+          .set(els, { x: -64, y: 16, scale: 1.14 }, .44)
+          .set(els, { x: 0, y: 0, scale: 1 }, .66));
+      }
+    }
+  },
+
+  /* 9 — Instagram: telefon çerçevesinin ekranında profilin ekran görüntüsü + sağda QR.
+         İki görsel varsa alt alta birleşir ve ekranın içinde yavaşça aşağı kayıp başa döner. */
+  instagram: {
+    build(s) {
+      const c = CONFIG.instagram, user = s.username || c.username, url = s.url || c.url || `https://www.instagram.com/${user}/`;
+      const screen = h('div', 'ig'), shots = IG.shots;
+      if (shots.length) {
+        const pad = c.inset > 0 && h('div');
+        const imgs = shots.map(sh => {
+          const im = h('img', null, null, { src: encodeURI(sh.src), alt: '', draggable: 'false' });
+          if (shots.length > 1) im.style.aspectRatio = `${sh.w} / ${sh.h}`;      // yükseklik, görsel çözülmeden belli olsun
+          return im;
+        });
+        if (pad) Object.assign(pad.style, { height: c.inset + 'px', background: c.screenBg });
+        if (c.crop > 0) imgs[0].style.marginTop = `${-c.crop / shots[0].w * 100}%`;   // üstten kırpma (yüzde: ekran genişliğine göre)
+        screen.append(h('div', 'ig-shot', h('div', 'ig-scroll' + (shots.length === 1 ? ' single' : ''), [pad, ...imgs])));
+      } else {                                          // görsel yok: ensō yedeği
+        const enso = document.createElementNS(SVGNS, 'svg');
+        enso.setAttribute('viewBox', '0 0 40 40');
+        enso.innerHTML = Enso.markup(90, 3, 0);
+        screen.append(h('div', 'ig-empty', [enso, '@' + user]));
+      }
+      // QR bir kez üretilip dosyaya kaydedildi (assets/instagram/qr.svg; adres değişirse: node tools/make_qr.js)
+      const plate = h('div', 'plate'), qr = h('img', null, null, { src: 'assets/instagram/qr.svg', alt: url });
+      qr.onerror = () => { const svg = qrSvg(url); if (svg) plate.innerHTML = svg; else plate.replaceChildren(h('div', 'nolib', url)); };
+      plate.append(qr);
+      return h('div', 'slide t-instagram', [
+        leftCol([h('div', 'kicker', s.kicker || 'Instagram', IN), h('h1', null, s.heading || s.title, IN),
+          s.text && h('p', 'txt', s.text, IN), h('p', 'handle', '@' + user, IN)], 770),
+        h('div', 'igphone', screen, IN),
+        h('div', 'qr', [h('div', 'kicker', s.qrLabel || 'Tara · Takip et'), plate,
+          h('div', 'url', url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))], IN)
+      ]);
+    },
+    enter(el, s, o) {                                   // 1,5 sn sonra yavaşça aşağı kayar, sonra başa döner; döngü
+      const sc = $('.ig-scroll:not(.single)', el);
+      if (!sc) return;
+      const over = sc.offsetHeight - sc.parentNode.clientHeight;
+      if (over > 4) track(el, gsap.to(sc, { y: -over, duration: CONFIG.instagram.scroll, ease: 'sine.inOut', repeat: -1, yoyo: true, repeatDelay: 1.2, delay: o.delay + 1.5 }));
+    }
+  },
+
+  /* 10 — Kapanış: yüzük + yin-yang (bkz. bölüm 17); ardından son cümle */
+  closing: {
+    build(s, w, o) {
+      const root = h('div', 'slide t-closing', [h('h1', 'line', s.text, OUT), s.sub && h('div', 'sub kicker', s.sub, OUT)]);
+      if (o.thumb) {                                    // önizleme: birleşmiş hali
+        const still = h('div', 'still');
+        still.innerHTML = '<svg viewBox="-360 -360 720 720"><circle r="290" fill="var(--paper)"/>' +
+          '<path d="M0-290A290 290 0 0 0 0 290A145 145 0 0 0 0 0A145 145 0 0 1 0-290Z" fill="#000"/>' +
+          '<circle cy="-145" r="35" fill="#000"/><circle cy="145" r="35" fill="var(--paper)"/>' +
+          '<circle r="290" fill="none" stroke="var(--gold)" stroke-width="116"/></svg>';
+        root.prepend(still);
+      }
+      return root;
+    },
+    enter(el, s, o) {
+      gsap.set(el.querySelectorAll('.line, .sub'), { opacity: 0 });
+      Closing.play(el, o.delay + .4);
+    }
+  }
+};
+
+/* --- Canlı sayfanın ortak hareketleri --- */
+function track(el, tw) { (el._tw || (el._tw = [])).push(tw); return tw; }
+function destroy(el) {
+  (el._tw || []).forEach(t => t.kill());
+  el.querySelectorAll('video').forEach(v => { v.pause(); v.removeAttribute('src'); v.load(); });
+  el.remove();
+}
+function windIn(el, delay) {                            // rüzgârın geldiği yönden (soldan) süzülerek gelir
+  const fast = el.querySelectorAll('[data-in=""]'), slow = el.querySelectorAll('[data-in="slow"]');
+  if (fast.length) track(el, gsap.fromTo(fast, { opacity: 0, x: -80 }, { opacity: 1, x: 0, duration: .95, ease: 'power3.out', stagger: .085, delay }));
+  if (slow.length) track(el, gsap.fromTo(slow, { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: 1.9, ease: 'power2.out', stagger: .12, delay: delay + .15 }));
+}
+function windOut(el) {                                  // rüzgâr yönünde (sağa) silinir
+  (el._tw || []).forEach(t => t.kill());
+  el.querySelectorAll('video').forEach(v => v.pause());
+  gsap.to(el.querySelectorAll('[data-in], [data-step], [data-out]'),
+    { x: '+=120', duration: .55, ease: 'power2.in', stagger: { amount: .18 }, overwrite: true });
+  gsap.to(el, { opacity: 0, duration: .62, ease: 'power2.in', onComplete: () => destroy(el) });
+}
+/* Adımlar: data-step ≤ step olanlar görünür. Yeni açılan adımdaki fırça rakam o anda çizilir. */
+function applySteps(el, step, animate) {
+  el.querySelectorAll('[data-step]').forEach(n => {
+    const on = +n.dataset.step <= step;
+    if (n._on === on) return;
+    n._on = on;
+    if (!animate) { n.style.opacity = on ? 1 : 0; return; }
+    if (on) {
+      track(el, gsap.fromTo(n, { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: .8, ease: 'power3.out', overwrite: true, delay: +n.dataset.delay || 0 }));
+      n.querySelectorAll('.brush').forEach(b => track(el, Brush.draw(b, .5, .12)));
+    } else track(el, gsap.to(n, { opacity: 0, x: 40, duration: .3, ease: 'power2.in', overwrite: true }));
+  });
+}
+function fit(root) {
+  const tall = root.querySelectorAll('[data-fitv]');
+  // 1) yüksekliğe sığmayan reversed sütunu önce "sıkı" dizgiye geçer (daha geniş sütun, daha küçük punto)
+  tall.forEach(el => {
+    el.style.transform = '';
+    el.classList.remove('dense');
+    if (el.classList.contains('col') && el.offsetHeight > +el.dataset.fitv) el.classList.add('dense');
+  });
+  // 2) tek satırlık başlıklar genişliğe (data-fit), dikey başlık yüksekliğe (data-fith) sığana kadar küçülür
+  for (const [attr, prop] of [['fit', 'offsetWidth'], ['fith', 'offsetHeight']]) {
+    root.querySelectorAll(`[data-${attr}]`).forEach(el => {
+      el.style.fontSize = '';
+      const max = +el.dataset[attr], v = el[prop];
+      if (v > max) el.style.fontSize = (parseFloat(getComputedStyle(el).fontSize) * max / v) + 'px';
+    });
+  }
+  // 3) hâlâ taşan blok bütün olarak küçültülür
+  tall.forEach(el => { const max = +el.dataset.fitv, v = el.offsetHeight; if (v > max) el.style.transform = `scale(${(max / v).toFixed(3)})`; });
+}
+
+/* =====================================================================
+   16) GEÇİŞLER — yalnızca zemin (#hole'un kırpma alanı) değişir; rüzgâr, yapraklar,
+       dal ve tuvaller hiç durmaz.
+       Yüzük  : reversed sayfada iki dünya arasında. 'toB' (A → B): yüzük beyaz tohumdan doğar,
+                ağır ağır dönerek büyür; deliği beyaz dünyadır. 'toA' (B → A): siyah tohumdan doğar.
+       Leke   : zemin rengi farklı iki sayfa arasında; hedef zeminin renginde, kenarı gürültüyle
+                düzensizleşen bir mürekkep damlası yayılır.
+   ===================================================================== */
+function ringTimeline(dur) {
+  const r = CONFIG.ring, tIn = dur * .2;
+  return gsap.timeline({ paused: true, onUpdate: Ring.update })
+    // tohumdan doğar → ağır bir kütle gibi dönerek büyür → yüzünü kameraya dönüp ekrandan taşar
+    .fromTo(RS, { s: 0 }, { s: r.scale[0], duration: tIn, ease: 'power2.out' }, 0)
+    .to(RS, { s: r.scale[1], duration: dur - tIn, ease: 'power2.in' }, tIn)
+    .fromTo(RS, { th: r.theta[0] }, { th: r.theta[1], duration: dur, ease: 'sine.inOut' }, 0)
+    .fromTo(RS, { tilt: r.tilt[0] }, { tilt: r.tilt[1], duration: dur, ease: 'sine.inOut' }, 0);
+}
+function setWorld(w) {
+  S.world = S.target = w;
+  stage.dataset.world = w;
+  RS.s = 0; RS.invert = false;
+  Ring.clear();
+  hole.style.clipPath = w === B ? 'none' : HOLE_CLOSED;       // B: zemin tamamen beyaz
+}
+function settle(w) {                                    // bir zemin geçişi bitti
+  setWorld(w);
+  S.busy = false; S.tl = null;
+  S.pending.forEach(el => { el.style.visibility = ''; });
+  S.pending.length = 0;
+  syncMedia();
+}
+function fastForward() { if (S.tl) S.tl.progress(1); }  // geçiş sürerken gelen komut: geçişi bitir, sonra uygula
+
+function ringTransition(direction) {
+  if (S.busy) return null;
+  Closing.stop(true);
+  RingShow.stop();
+  S.busy = true;
+  const toB = direction === 'toB', w = toB ? B : A, dur = toB ? CONFIG.dur.toB : CONFIG.dur.toA;
+  const emerge = toB || CONFIG.ring.toA === 'emerge', side = CUR.els.find(el => el._w === w);
+  const reveal = () => { if (side && TYPES.reversed.reveal) TYPES.reversed.reveal(side); };
+  const tl = ringTimeline(dur), done = () => { settle(w); Enso.draw(); if (!emerge) reveal(); };
+  S.target = w; S.tl = tl;
+  syncMedia();
+  Sound.ring(dur, toB);
+  gsap.to(ringBtn, { rotationY: toB ? 180 : 0, duration: dur, ease: 'power2.inOut' });
+  if (emerge) {
+    RS.invert = !toB;
+    tl.call(reveal, null, dur * .78).eventCallback('onComplete', done).play(0);
+  } else tl.eventCallback('onReverseComplete', done).progress(1).reverse();
+  return tl;
+}
+
+const BS = { p: 0, x: W / 2, y: H / 2, rmax: 1, seed: 0, invert: false };
+function blotUpdate() {
+  const n = 260, R = BS.p * BS.rmax, amp = 1 - .5 * BS.p;   // yayıldıkça kenar sakinleşir
+  let poly = '', first = '';
+  for (let i = 0; i < n; i++) {
+    const a = i / n * TAU, c = Math.cos(a), s = Math.sin(a);
+    // kenar: büyük loblar + orta boy girintiler + ince saçaklar; hepsi yayılırken yavaşça kıpırdar
+    const k = 1 + amp * (.3 * Noise(c * 1.1 + BS.seed, s * 1.1, BS.p * 1.3) + .12 * Noise(c * 3.1, s * 3.1 + BS.seed, BS.p * 2.2)
+      + .05 * Noise(c * 8, s * 8, BS.seed + BS.p * 3));
+    const pt = (BS.x + c * R * k).toFixed(1) + 'px ' + (BS.y + s * R * k).toFixed(1) + 'px';
+    if (!i) first = pt;
+    poly += (i ? ',' : '') + pt;
+  }
+  // invert: beyaz zemin lekenin DIŞINDA kalır (beyaz → siyah: leke siyah dünyayı açar)
+  hole.style.clipPath = BS.invert
+    ? `polygon(evenodd, 0px 0px, ${W}px 0px, ${W}px ${H}px, 0px ${H}px, 0px 0px, ${poly}, ${first}, 0px 0px)`
+    : `polygon(${poly})`;
+}
+function blot(w, seed) {
+  const rnd = mulberry32(seed * 977 + 13);
+  S.busy = true;
+  BS.x = 560 + rnd() * 800; BS.y = 330 + rnd() * 420; BS.seed = rnd() * 50; BS.invert = w === A;
+  BS.rmax = Math.max(...[[0, 0], [W, 0], [0, H], [W, H]].map(q => Math.hypot(q[0] - BS.x, q[1] - BS.y))) / .76;   // en girintili kenar bile ekranı kaplar
+  S.tl = gsap.fromTo(BS, { p: 0 }, { p: 1, duration: CONFIG.dur.blot, ease: 'power2.inOut', onUpdate: blotUpdate, onComplete: () => settle(w) });
+}
+
+/* =====================================================================
+   17) KAPANIŞ — yüzük ortada doğar ve büyüyerek ekranı dikeyde ikiye böler (sol siyah, sağ beyaz).
+       Sonra geri küçülürken yarılar birbirinin etrafında döner, ayrım çizgisi S'ye kıvrılır ve
+       tek bir yin-yang dairesinde birleşir; iki tohum yerine oturur, son cümle belirir.
+       Yin-yang #fx tuvaline, her karede yüzüğün deliğine (Ring.pts) kırpılarak çizilir.
+   ===================================================================== */
+const CS = { phi: 0, k: 0, seed: 0 };
+const Closing = {
+  tl: null, R: 290, cy: 460,                            // birleşmiş dairenin yarıçapı ve merkez yüksekliği (px)
+  unit: H / 2 / Math.tan(CONFIG.ring.fov * Math.PI / 360) / CONFIG.ring.dist,   // z=0 düzleminde 1 birim kaç piksel
+  frame() { Ring.update(); Closing.draw(); },
+  play(el, delay) {
+    this.stop(true);
+    RingShow.stop();
+    const r = CONFIG.ring, U = this.unit, g = this.frame;
+    RS.mode = 'closing'; RS.invert = false; RS.cy = 0;
+    CS.phi = CS.k = CS.seed = 0;
+    fxCanvas.style.visibility = 'visible';
+    this.tl = gsap.timeline({ delay, onUpdate: g })
+      .fromTo(RS, { s: 0 }, { s: .3, duration: 1, ease: 'power2.out' }, 0)
+      .fromTo(RS, { th: r.theta[0] }, { th: TAU, duration: 3, ease: 'sine.inOut' }, 0)
+      .fromTo(RS, { tilt: r.tilt[0] }, { tilt: 0, duration: 3, ease: 'sine.inOut' }, 0)
+      .to(RS, { s: r.scale[1], duration: 2, ease: 'power2.in' }, 1)                    // ekran ikiye bölündü
+      .to(RS, { s: this.R / U, cy: (H / 2 - this.cy) / U, duration: 3.1, ease: 'power3.inOut' }, 3.5)
+      .to(CS, { phi: TAU, duration: 3.5, ease: 'power2.inOut' }, 3.3)                  // yarılar birbirinin etrafında döner
+      .to(CS, { k: 1, duration: 2.1, ease: 'power2.inOut' }, 4.5)                      // çizgi S'ye kıvrılır
+      .to(CS, { seed: 1, duration: .7, ease: 'back.out(2.6)' }, 6.6)                   // tohumlar yerine oturur
+      .to(el.querySelectorAll('.line, .sub'), { opacity: 1, duration: 1.6, ease: 'power2.out', stagger: .5 }, 7.1);
+    Sound.ring(6, true);
+  },
+  draw() {
+    const g = this.g || (this.g = fxCanvas.getContext('2d')), n = Ring.n, P = Ring.pts, c = CONFIG.colors;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, W, H);
+    if (!n) return;
+    const R = RS.s * this.unit, big = 4200;
+    g.save();
+    g.beginPath();
+    for (let i = 0; i < n; i++) i ? g.lineTo(P[i * 2], P[i * 2 + 1]) : g.moveTo(P[0], P[1]);
+    g.closePath();
+    g.clip();
+    g.translate(W / 2, H / 2 - RS.cy * this.unit);
+    g.rotate(CS.phi);
+    g.fillStyle = c.black; g.fillRect(-big, -big, big, 2 * big);
+    g.fillStyle = c.paper; g.fillRect(0, -big, big, 2 * big);
+    if (CS.k > .001) {                                  // iki yarım daire: üstteki beyaz sola, alttaki siyah sağa taşar
+      g.fillStyle = c.paper; g.beginPath(); g.ellipse(0, -R / 2, CS.k * R / 2, R / 2, 0, 0, TAU); g.fill();
+      g.fillStyle = c.black; g.beginPath(); g.ellipse(0, R / 2, CS.k * R / 2, R / 2, 0, 0, TAU); g.fill();
+    }
+    if (CS.seed > .001) {
+      g.fillStyle = c.black; g.beginPath(); g.arc(0, -R / 2, R * .12 * CS.seed, 0, TAU); g.fill();
+      g.fillStyle = c.paper; g.beginPath(); g.arc(0, R / 2, R * .12 * CS.seed, 0, TAU); g.fill();
+    }
+    g.restore();
+  },
+  // Sayfadan çıkarken yüzük tohuma geri çekilir; now=true: anında temizle (başka bir yüzük geçişi başlıyor)
+  stop(now) {
+    if (RS.mode !== 'closing') return;
+    if (this.tl) this.tl.kill();
+    const end = () => {
+      this.tl = null;
+      RS.s = 0; RS.cy = 0; RS.mode = 'world';
+      Ring.clear();
+      if (this.g) this.g.clearRect(0, 0, W, H);
+      fxCanvas.style.visibility = 'hidden';
+    };
+    if (now) end();
+    else this.tl = gsap.to(RS, { s: 0, duration: .4, ease: 'power2.in', onUpdate: this.frame, onComplete: end });
+  }
+};
+
+/* Yalnızca gösterim: yüzük ortanın üstünde belirir ve kendi ekseninde ağır ağır döner; zemine dokunmaz. */
+const RingShow = {
+  tw: [],
+  play(delay) {
+    Closing.stop(true);
+    this.stop();
+    RS.mode = 'show'; RS.invert = false; RS.s = 0; RS.th = 0; RS.tilt = .22; RS.cy = 1.02;
+    this.tw = [gsap.to(RS, { s: .42, duration: 1.5, ease: 'back.out(1.5)', delay }),
+               gsap.to(RS, { th: TAU, duration: 7, ease: 'none', repeat: -1, onUpdate: Ring.update })];
+  },
+  stop() {
+    if (RS.mode !== 'show') return;
+    this.tw.forEach(t => t.kill());
+    RS.s = 0; RS.cy = 0; RS.mode = 'world';
+    Ring.clear();
+  }
+};
+
+/* =====================================================================
+   18) GEZİNME — durum = (sayfa, adım). Adım: listede/tarifte açılan madde sayısı,
+       reversed sayfada dünya (0 = A, 1 = B).
+   ===================================================================== */
+/* Silüet preset'leri: "crowd" | "solo:<dosya>" | "pair:<d1>,<d2>" | "none" → figür listesi.
+   Ad klasörde yoksa önce CONFIG.silhouettes.alias'a, sonra en çok ortak sözcüğü olan dosyaya bakılır. */
+function resolveSilhouette(name) {
+  const files = Object.keys(FILES).filter(k => FILES[k].includes('silhouettes/')), c = CONFIG.silhouettes;
+  name = name.trim();
+  if (!files.length || files.includes(name)) return name;
+  if (files.includes(c.alias[name])) return c.alias[name];
+  const canon = t => ({ male: 'man', female: 'woman', walker: 'walking' }[t] || t), toks = n => n.split('-').map(canon), want = toks(name);
+  let best = files[0], score = -1;
+  for (const f of files) { const sc = toks(f).filter(t => want.includes(t)).length; if (sc > score) { score = sc; best = f; } }
+  console.warn(`Silüet "${name}" bulunamadı; en yakın dosya kullanılıyor: ${best}`);
+  return best;
+}
+function applyPreset(s, spec, layer, seed) {
+  const c = CONFIG.silhouettes, obj = spec && typeof spec === 'object';
+  // "pair:a,b"  ya da  { preset: 'pair', figures: ['a', { src: 'b', flip: true }] }
+  const [kind, arg] = obj ? [spec.preset] : String(spec).split(':');
+  const figs = (obj ? spec.figures || [] : (arg || '').split(',').filter(t => t.trim()))
+    .map(f => (typeof f === 'string' ? { src: f } : f)).map(f => Object.assign({}, f, { src: resolveSilhouette(f.src) }));
+  // faceRight: figür sağa mı baksın? Görselin bilinen yönü (facing) farklıysa yatay çevrilir.
+  // Figürdeki flip:true bu sonucu bir kez daha çevirir (yönü bilinmeyen yan profiller için).
+  const fig = (f, x, scale, faceRight) => ({ src: f.src, x: f.x || x, y: c.ground, scale: f.scale || scale, layer,
+    flip: (!!c.facing[f.src] && (c.facing[f.src] === 'right') !== faceRight) !== !!f.flip });
+  if (kind === 'crowd') s.crowds.push(Object.assign({ layer, seed }, c.crowd));
+  else if (kind === 'solo' && figs[0]) {
+    const x = s.nature === 'bonsai' ? c.solo.xBonsai : c.solo.x;
+    s.silhouettes.push(fig(figs[0], x, c.solo.scale, false));
+    s.horizons.push({ layer, y: c.ground, from: x - 330, to: s.nature === 'bonsai' ? x + 250 : 1790 });
+  } else if (kind === 'pair' && figs.length > 1) {
+    s.silhouettes.push(fig(figs[0], c.pair.x[0], c.pair.scale[0], true), fig(figs[1], c.pair.x[1], c.pair.scale[1], false));
+    s.horizons.push({ layer, y: c.ground, from: c.pair.x[0] - 240, to: 1790 });
+  } else if (kind !== 'none') console.warn(`Bilinmeyen silüet düzeni: ${JSON.stringify(spec)}`);
+}
+function expandSilhouettes(s, seed) {
+  const spec = s.silhouettes;
+  if (Array.isArray(spec)) return;                      // elle yerleşim: olduğu gibi
+  s.silhouettes = [];
+  s.crowds = (s.crowds || []).slice();
+  s.horizons = (s.horizons || []).slice();
+  if (s.type === 'reversed') {                          // A: kalabalık (beyaz) · B: yazılan düzen (siyah)
+    applyPreset(s, s.silhouettesA || 'crowd', 'white', seed);
+    applyPreset(s, spec || 'none', 'black', seed);
+  } else if (spec) applyPreset(s, spec, s.world === 'light' ? 'black' : 'white', seed);
+}
+
+const SLIDES = [];
+function normalizeSlides() {
+  let section = '', no = 0;
+  for (const raw of window.SLIDES || []) {
+    const s = Object.assign({ world: 'dark' }, raw);
+    if (!TYPES[s.type]) { console.warn(`Bilinmeyen sayfa tipi: ${s.type}`); s.text = s.text || s.title; s.type = 'statement'; }
+    if (s.type === 'section') {                         // bölüm sayfası etiketi üretir
+      if (s.number == null) s.number = pad2(++no);
+      s.name = s.name || s.title || '';
+      s.title = s.title || s.name;
+      s.section = `${s.number} — ${s.name}`;
+    }
+    if (s.section) section = s.section; else s.section = section;
+    expandSilhouettes(s, SLIDES.length + 3);
+    SLIDES.push(s);
+    if (s.type === 'tip' && s.reversed)                 // püf noktasının arkasından otomatik reversed sayfa
+      SLIDES.push(Object.assign({ type: 'reversed', world: 'dark', section: s.section, title: s.title, notes: s.notes }, s.reversed));
+  }
+  SLIDES.forEach(s => { s._steps = TYPES[s.type].steps ? TYPES[s.type].steps(s) : 0; });
+}
+const worldAt = (s, step) => (s.type === 'reversed' ? (step ? B : A) : s.world === 'light' ? B : A);
+function nextState(i, step) {
+  if (step < SLIDES[i]._steps) return [i, step + 1];
+  return i < SLIDES.length - 1 ? [i + 1, 0] : [i, step];
+}
+function prevState(i, step) {                           // geri: önce adımlar geri sarılır, sonra önceki sayfanın son hali
+  if (step > 0) return [i, step - 1];
+  return i > 0 ? [i - 1, SLIDES[i - 1]._steps] : [i, step];
+}
+const hashIndex = () => clamp((parseInt(location.hash.slice(1), 10) || 1) - 1, 0, SLIDES.length - 1);
+
+const CUR = { i: -1, step: 0, s: null, els: [] };
+
+/* =====================================================================
+   METİN GÜVENLİ ALANI — rüzgâr izleri ve yapraklar metnin üstünden geçmez.
+   Her sayfada görünen metin öğelerinin (başlık, alt başlık, madde, diyalog…) sınırları biraz
+   genişletilerek toplanır. İzler bu alanlarda yumuşak kenarlı bir maskeyle silinir (alana girerken
+   opaklık sıfıra iner); yapraklar alana yaklaşırken söner, öbür yanından yeniden belirir: metnin
+   arkasından geçmiş olur. Metin katmanı (DOM) zaten tuvallerin üstündedir.
+   ===================================================================== */
+const SAFE_SEL = 'h1, p, li, blockquote, .kicker, .label, .stat, .foot, .meta';
+function updateSafe() {
+  if (PRESENTER || !layerW) return;
+  const sr = stage.getBoundingClientRect(), k = stageScale, pad = CONFIG.safe.pad, range = document.createRange();
+  for (const L of [layerW, layerB]) {
+    const el = CUR.els.find(e => e._w === L.w), rects = [];
+    if (el) el.querySelectorAll(SAFE_SEL).forEach(n => {
+      if (n.closest('.igphone, .qr, .hanko, .m')) return;                    // kendi zemini olan bloklar
+      const st = n.closest('[data-step]');
+      if (st && !st._on) return;                                             // henüz açılmamış madde
+      range.selectNodeContents(n);                                           // kutunun değil, yazının kapladığı alan
+      const r = range.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4) return;
+      rects.push({ l: (r.left - sr.left) / k - pad, t: (r.top - sr.top) / k - pad, r: (r.right - sr.left) / k + pad, b: (r.bottom - sr.top) / k + pad });
+    });
+    L.safe = rects;
+    const m = L.mask || (L.mask = mkCanvas(W / 4, H / 4)), g = m.getContext('2d');
+    g.clearRect(0, 0, m.width, m.height);
+    if ('filter' in g) g.filter = `blur(${CONFIG.safe.soft / 4}px)`;
+    for (const q of rects) g.fillRect(q.l / 4, q.t / 4, (q.r - q.l) / 4, (q.b - q.t) / 4);
+  }
+}
+/* İçerik süzülerek geldiği için sınırlar giriş hareketi bitince bir kez daha ölçülür */
+let safeTimers = [];
+function scheduleSafe() {
+  safeTimers.forEach(clearTimeout);
+  safeTimers = [0, 700, 1500, 2800].map(ms => setTimeout(updateSafe, ms));
+}
+function safeFade(x, y, rects) {                        // 1: alanın dışında · 0: alanın içinde
+  let f = 1;
+  for (const q of rects) {
+    const d = Math.max(q.l - x, x - q.r, q.t - y, y - q.b);
+    if (d < 46) f = Math.min(f, smooth(-4, 46, d));
+  }
+  return f;
+}
+
+
+function go(i, step, o = {}) {
+  i = clamp(i | 0, 0, SLIDES.length - 1);
+  const s = SLIDES[i], T = TYPES[s.type];
+  step = clamp(step | 0, 0, s._steps);
+  if (S.busy) fastForward();
+  if (i === CUR.i) {
+    if (step === CUR.step) return;
+    const turn = worldAt(s, step) !== worldAt(s, CUR.step);   // reversed: dünya değişiyorsa yüzük; yoksa yalnızca maddeler
+    CUR.step = step;
+    if (turn) ringTransition(step ? 'toB' : 'toA');
+    CUR.els.forEach(el => applySteps(el, step, true));
+  } else {
+    const first = CUR.i < 0, from = S.world, target = worldAt(s, step), same = !first && target === from;
+    const delay = first ? .25 : same ? .34 : .3;
+    Closing.stop();
+    RingShow.stop();
+    // eski sayfa: görünen katmandaki içerik rüzgârla silinir; gizli katmandaki hemen kalkar
+    for (const el of CUR.els) (!first && el._w === from ? windOut : destroy)(el);
+    CUR.i = i; CUR.step = step; CUR.s = s;
+    if (first) setWorld(target);
+    S.target = target;
+    setScene(s, target, first);
+    CUR.els = (s.type === 'reversed' ? [A, B] : [target]).map(w => {
+      const el = T.build(s, w, {});
+      el._w = w;
+      (w === A ? slidesW : slidesB).appendChild(el);
+      fit(el);
+      applySteps(el, step, false);
+      windIn(el, delay);
+      if (T.enter) T.enter(el, s, { delay });
+      if (T.reveal && w === target) T.reveal(el);
+      // reversed'in öbür yüzü, kaybolmakta olan zeminde bir an bile görünmesin
+      if (!first && !same && w === from) { el.style.visibility = 'hidden'; S.pending.push(el); }
+      return el;
+    });
+    if (!first && !same) blot(target, i);
+    Enso.draw();
+  }
+  chrome();
+  syncMedia();
+  scheduleSafe();
+  if (!o.remote) Sync.send({ t: 'state', i: CUR.i, step: CUR.step });
+}
+
+/* Üst/alt bilgi satırları, ilerleme çizgisi, URL */
+const SEGMENTS = [];
+function buildProgress() {
+  const bar = $('#progress');
+  SLIDES.forEach((s, i) => {
+    const last = SEGMENTS[SEGMENTS.length - 1];
+    if (last && last.label === s.section) last.n++;
+    else SEGMENTS.push({ label: s.section, from: i, n: 1, el: bar.appendChild(h('i', null, h('b'))) });
+  });
+  SEGMENTS.forEach(g => g.el.style.setProperty('--n', g.n));
+}
+function chrome() {
+  const s = CUR.s, n = SLIDES.length;
+  document.title = `${s.title || s.type} — DinamİK`;
+  stage.dataset.type = s.type;
+  $('#top .section').textContent = s.section || '';
+  $('#top .concept').textContent = s.title || '';
+  $('#bottom .page').textContent = `${pad2(CUR.i + 1)} / ${pad2(n)}`;
+  if (s.type === 'reversed') {
+    $('#bottom .ia').textContent = (s.worldA || {}).label || 'Kitle İletişimi';
+    $('#bottom .ib').textContent = (s.worldB || {}).label || 'Birebir İletişim';
+  }
+  SEGMENTS.forEach(g => g.el.style.setProperty('--p', clamp((CUR.i + 1 - g.from) / g.n, 0, 1)));
+  if (location.hash !== '#' + (CUR.i + 1)) history.replaceState(null, '', '#' + (CUR.i + 1));
+}
+/* Videolar: sayfası ve dünyası görünürken oynar, aksi halde durur. Ses, ses düğmesine bağlıdır;
+   tarayıcı sesli otomatik oynatmayı engellerse (ör. sayfa yenilendiğinde) sessiz başlar. */
+function syncMedia() {
+  for (const el of CUR.els) el.querySelectorAll('video').forEach(v => {
+    if (el._w === S.target && !S.overview) {
+      if (!v.paused) return;
+      v.muted = !Sound.on;
+      const p = v.play();
+      if (p) p.catch(() => { v.muted = true; v.play().catch(() => {}); });
+    } else v.pause();
+  });
+}
+
+/* =====================================================================
+   19) ÖNİZLEME IZGARASI (O) + SUNUCU GÖRÜNÜMÜ (N)
+       Önizleme = aynı build() çıktısı, küçültülmüş sabit bir sahnede (hareketsiz).
+       Sunucu görünümü aynı dosyadır (?presenter); pencereler BroadcastChannel ile
+       (ve yedek olarak postMessage ile) aynı (sayfa, adım) durumunu paylaşır.
+   ===================================================================== */
+const RO = new ResizeObserver(es => es.forEach(e => e.target.style.setProperty('--k', e.contentRect.width / W)));
+function makeThumb(i, step) {
+  const s = SLIDES[i], w = worldAt(s, step), key = w === A ? 'white' : 'black';
+  const cv = mkCanvas(W / 4, H / 4), g = cv.getContext('2d'), sc = sceneFor(s, key);
+  g.scale(.25, .25);
+  for (const f of sc.figs) {
+    g.save();
+    if (f.flip) { g.translate(2 * f.x, 0); g.scale(-1, 1); }
+    g.drawImage(f.sp[key], f.x - f.w / 2, f.y - f.h, f.w, f.h);
+    g.restore();
+  }
+  g.fillStyle = CONFIG.colors[key];
+  for (const l of sc.lines) g.fillRect(l.from, l.y, l.to - l.from, 2);
+  const el = TYPES[s.type].build(s, w, { thumb: true });
+  applySteps(el, step, false);
+  const t = h('div', 'thumb', h('div', 'mini world-' + (w === A ? 'dark' : 'light'), [cv, el]));
+  RO.observe(t);
+  return t;
+}
+const fullStep = s => (s.type === 'reversed' ? 0 : s._steps);   // önizlemede: tüm maddeler açık, reversed A yüzünde
+
+const Overview = {
+  el: $('#overview'),
+  toggle(on = !S.overview) {
+    const grid = $('.grid', this.el);
+    S.overview = on;
+    this.el.classList.toggle('open', on);
+    RO.disconnect();
+    grid.textContent = '';
+    if (on) {
+      SLIDES.forEach((s, i) => {
+        const item = h('div', 'ov' + (i === CUR.i ? ' cur' : ''),
+          [makeThumb(i, fullStep(s)), h('p', null, [h('span', null, pad2(i + 1)), h('span', null, s.title || s.type)])]);
+        item.addEventListener('click', () => { this.toggle(false); go(i, 0); });
+        grid.append(item);
+      });
+      grid.querySelectorAll('.mini').forEach(fit);
+      const cur = $('.cur', grid);
+      if (cur) cur.scrollIntoView({ block: 'center' });
+    }
+    syncMedia();
+  }
+};
+
+const Sync = {
+  bc: null, peer: null,
+  init(onMsg) {
+    try { this.bc = new BroadcastChannel('dinamik-sunum'); this.bc.onmessage = e => onMsg(e.data); } catch (e) {}
+    addEventListener('message', e => { if (e.data && e.data.sunum) onMsg(e.data); });
+  },
+  send(m) {
+    m.sunum = 1;
+    try { if (this.bc) this.bc.postMessage(m); } catch (e) {}
+    const p = this.peer || window.opener;                // aynı durum iki yoldan gelirse ikincisi etkisizdir
+    try { if (p && !p.closed) p.postMessage(m, '*'); } catch (e) {}
+  }
+};
+
+const Presenter = {
+  i: 0, step: 0, t0: 0,
+  open() {
+    const url = location.href.split('#')[0].split('?')[0] + '?presenter#' + (CUR.i + 1);
+    Sync.peer = window.open(url, 'dinamikSunucu', 'popup,width=1400,height=820');
+  },
+  init() {
+    document.body.classList.add('presenter');
+    document.title = 'Sunucu Görünümü — DinamİK';
+    const root = this.root = h('div', null, null, { id: 'pv' });
+    root.innerHTML =
+      '<header><span class="pg"></span><span class="sec"></span><span class="stp"></span><span class="sp"></span>' +
+      '<span class="clock"></span><button class="timer" title="Süreyi sıfırla">00:00</button></header>' +
+      '<main><section class="cur"><label>Şimdi</label><div class="slot"></div></section>' +
+      '<section class="next"><label>Sonraki sayfa</label><div class="slot"></div><label class="nl">Konuşmacı notları</label><div class="notes main"></div></section></main>' +
+      '<footer><span>← → Space: gezin · R: dünyayı değiştir · G + sayı + Enter: sayfaya git · F: tam ekran</span>' +
+      '<span><button class="prev">← Geri</button><button class="fwd">İleri →</button></span></footer>';
+    document.body.append(root);
+    $('.prev', root).onclick = () => Nav.prev();
+    $('.fwd', root).onclick = () => Nav.next();
+    $('.timer', root).onclick = () => { this.t0 = Date.now(); this.tick(); };
+    this.t0 = Date.now();
+    setInterval(() => this.tick(), 500);
+    Sync.init(m => { if (m.t === 'state') this.set(m.i, m.step, true); });
+    this.set(hashIndex(), 0, true);
+    Sync.send({ t: 'hello' });                           // sahne penceresi güncel durumu yollar
+  },
+  tick() {
+    const s = Math.floor((Date.now() - this.t0) / 1000), d = new Date();
+    $('.timer', this.root).textContent = (s >= 3600 ? pad2(Math.floor(s / 3600)) + ':' : '') + pad2(Math.floor(s / 60) % 60) + ':' + pad2(s % 60);
+    $('.clock', this.root).textContent = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  },
+  set(i, step, remote) {
+    i = clamp(i | 0, 0, SLIDES.length - 1);
+    step = clamp(step | 0, 0, SLIDES[i]._steps);
+    if (i === this.i && step === this.step && this.drawn) return;
+    this.i = i; this.step = step; this.drawn = true;
+    this.render();
+    if (!remote) Sync.send({ t: 'state', i, step });
+  },
+  render() {
+    const root = this.root, s = SLIDES[this.i], nx = SLIDES[this.i + 1], [a, b] = root.querySelectorAll('.slot');
+    RO.disconnect();
+    a.replaceChildren(makeThumb(this.i, this.step));
+    b.replaceChildren(nx ? makeThumb(this.i + 1, fullStep(nx)) : h('div', 'notes', 'Son sayfa.'));
+    root.querySelectorAll('.mini').forEach(fit);
+    $('.pg', root).textContent = `${pad2(this.i + 1)} / ${pad2(SLIDES.length)}`;
+    $('.sec', root).textContent = [s.section, s.title].filter(Boolean).join(' · ');
+    $('.stp', root).textContent = s.type === 'reversed' ? (this.step ? 'Birebir (beyaz)' + (s._steps > 1 ? ` · ${this.step - 1} / ${s._steps - 1}` : '') : 'Kitle (siyah)')
+      : s._steps ? `Adım ${this.step} / ${s._steps}` : '';
+    $('.notes.main', root).textContent = s.notes || '—';
+    history.replaceState(null, '', '#' + (this.i + 1));
+  }
+};
+
+/* =====================================================================
+   20) KONTROLLER
+       → / Space / tıklama: ileri    ←: geri    R ya da yüzük düğmesi: reversed sayfada dünya değiştir
+       F: tam ekran    O: önizleme ızgarası    N: sunucu görünümü    M: ses    G + sayı + Enter: sayfaya git
+   ===================================================================== */
+const Nav = {
+  get i() { return PRESENTER ? Presenter.i : CUR.i; },
+  get step() { return PRESENTER ? Presenter.step : CUR.step; },
+  go(i, step) { if (PRESENTER) Presenter.set(i, step); else go(i, step); },
+  next() { this.go(...nextState(this.i, this.step)); },
+  prev() { this.go(...prevState(this.i, this.step)); },
+  toggle() { const s = SLIDES[this.i]; if (s.type === 'reversed') this.go(this.i, this.step ? 0 : s._steps); }
+};
+let goBuf = null;                                       // "G" ile başlayan sayfa numarası girişi
+function showHud(text) {
+  const hud = $('#hud');
+  hud.textContent = text;
+  hud.style.display = text ? 'block' : 'none';
+}
+addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || !SLIDES.length) return;
+  if (goBuf !== null) {
+    e.preventDefault();
+    if (/^\d$/.test(e.key)) goBuf = (goBuf + e.key).slice(0, 3);
+    else if (e.key === 'Backspace') goBuf = goBuf.slice(0, -1);
+    else {
+      const n = e.key === 'Enter' ? +goBuf : 0;
+      goBuf = null;
+      showHud('');
+      if (n) Nav.go(n - 1, 0);
+      return;
+    }
+    showHud(`Sayfa ${goBuf || '…'} ↵`);
+    return;
+  }
+  if (e.repeat) return;
+  if (S.overview) { if (e.code === 'KeyO' || e.code === 'Escape') Overview.toggle(false); return; }
+  switch (e.code) {
+    case 'Space': case 'ArrowRight': case 'PageDown': e.preventDefault(); Nav.next(); break;
+    case 'ArrowLeft': case 'PageUp': e.preventDefault(); Nav.prev(); break;
+    case 'Home': Nav.go(0, 0); break;
+    case 'End': Nav.go(SLIDES.length - 1, 0); break;
+    case 'KeyR': Nav.toggle(); break;
+    case 'KeyG': goBuf = ''; showHud('Sayfa … ↵'); break;
+    case 'KeyF': if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); break;
+    case 'KeyM': if (!PRESENTER) Sound.toggle(); break;
+    case 'KeyO': if (!PRESENTER) Overview.toggle(); break;
+    case 'KeyN': if (!PRESENTER) Presenter.open(); break;
+  }
+});
+stage.addEventListener('click', e => { if (!e.target.closest('button')) Nav.next(); });
+// Butonlar odak tutmasın; yoksa Space hem butonu hem klavye kısayolunu tetikler
+ringBtn.addEventListener('click', () => { ringBtn.blur(); Nav.toggle(); });
+soundBtn.addEventListener('click', () => { soundBtn.blur(); Sound.toggle(); });
+
+/* =====================================================================
+   21) BAŞLAT
+   ===================================================================== */
+async function start() {
+  applyConfig();
+  normalizeSlides();
+  if (!SLIDES.length) { const n = $('#nolib'); n.textContent = 'slides.js yüklenemedi ya da SLIDES dizisi boş.'; n.style.display = 'grid'; return; }
+  makeInkMasks();
+  if (PRESENTER) {                                      // sunucu görünümü: sahne, rüzgâr ve yüzük çalışmaz
+    await loadAssets(false);
+    Presenter.init();
+    return;
+  }
+  Sound.init();
+  makeWashi($('#washi'));
+  makeSmoke();
+  Enso.init();
+  buildProgress();
+  addEventListener('resize', fitStage);
+  fitStage();
+  gsap.set(ringBtn, { transformPerspective: 400 });
+
+  await loadAssets(true);
+  layerW = makeLayer($('#cvW'), 'white');
+  layerB = makeLayer($('#cvB'), 'black');
+  layerW.other = layerB; layerB.other = layerW;
+  for (let i = 0; i < CONFIG.wind.free; i++) { const r = newRibbon(); spawnFree(r); r.age = rand(r.life * .6); FREE.push(r); }
+  initLeaves();
+  last = performance.now();
+  requestAnimationFrame(loop);
+
+  Sync.init(m => {
+    if (m.t === 'hello') Sync.send({ t: 'state', i: CUR.i, step: CUR.step });
+    else if (m.t === 'state') go(m.i, m.step, { remote: true });
+  });
+  go(hashIndex(), 0);
+  addEventListener('hashchange', () => { const i = hashIndex(); if (i !== CUR.i) go(i, 0); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { CUR.els.forEach(fit); scheduleSafe(); });
+
+  window.sunum = { go, Nav, S, CUR, SLIDES, CONFIG, Wind, stats: STATS };   // konsoldan erişim
+}
+if (window.gsap) start(); else document.getElementById('nolib').style.display = 'grid';
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+Instagram sayfası bu klasördeki dosyaları kullanır:
+
+  profile-1.png   profilin ekran görüntüsü; telefon çerçevesinin ekranına yerleşir
+  profile-2.png   (isteğe bağlı) devamı; varsa ilkinin altına eklenir ve ekran yavaşça kaydırılır
+  qr.svg          QR kod (adres değişirse: node tools/make_qr.js <adres>)
+
+Uzantı png, jpg, jpeg ya da webp olabilir. profile-1 yoksa ekranda ensō yedeği görünür.
+Ayarlar (üstten kırpma, çentik boşluğu, kaydırma süresi): index.html → CONFIG.instagram
